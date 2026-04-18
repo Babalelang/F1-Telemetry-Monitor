@@ -1,4 +1,4 @@
-# this code should only does user input and orchestrates other files
+#main py this code should only does user input and orchestrates other files
 
 from config import GRP_MAP, session_types, Valid_Years
 from loader import load_session, get_telemetry
