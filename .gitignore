@@ -1,0 +1,18 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual env
+venv/
+
+# FastF1 cache
+*.ff1pkl
+.cache/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+fastf1_http_cache*
+.cache/
+*.ff1pkl

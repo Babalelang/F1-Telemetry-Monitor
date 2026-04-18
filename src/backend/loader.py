@@ -12,6 +12,10 @@ def load_session(year,gp,session_type):
     session.load()
     return session
 
+def get_telemetry(lap):
+    return lap.get_car_data().add_distance()
+
+
 
 #Weather data
 def get_weather(session):
