@@ -4,7 +4,7 @@ import numpy as np
 
 #this function finds an specific lap for a driver
 def get_driver_lap(session,driver,lap_choice): 
-    driver_laps = session.laps.pick_driver(driver)
+    driver_laps = session.laps.pick_drivers(driver)
     if lap_choice == "f":
         return driver_laps.pick_fastest()
     else:
@@ -24,7 +24,7 @@ def get_compound_summary(laps):
     
 #lap time analysis
 def lap_time_analysis(session,driver):
-    laps = session.laps.pick_driver(driver)
+    laps = session.laps.pick_drivers(driver)
 
     #convert the lap times to seconds
     lap_times = laps["LapTime"].dt.total_seconds()
@@ -44,7 +44,7 @@ def lap_time_analysis(session,driver):
 
 #lap time analysis
 def sector_time_analysis(session,driver):
-    laps = session.laps.pick_driver(driver)
+    laps = session.laps.pick_drivers(driver)
     return{
         "sector1_avg": laps["Sector1Time"].mean(),
         "sector2_avg": laps["Sector2Time"].mean(),
@@ -53,7 +53,7 @@ def sector_time_analysis(session,driver):
 
 #Driver comparision
 def get_fastest_lap(session,driver):
-    laps = session.laps.pick_driver(driver)
+    laps = session.laps.pick_driverss(driver)
     return laps.pick_fastest()
 
 def compare_telemetry(lap1,lap2):
@@ -64,7 +64,7 @@ def compare_telemetry(lap1,lap2):
 
 
 def tyre_stint_analysis(session,driver):
-    laps = session.laps.pick_driver(driver)
+    laps = session.laps.pick_drivers(driver)
 
     stints = laps.groupby(["Stint", "Compound"])["TyreLife"].max()
     return stints

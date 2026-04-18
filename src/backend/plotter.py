@@ -96,7 +96,7 @@ def plot_track_map(lap, driver):
 # 5. Lap Time Chart — all laps for a driver
 
 def plot_lap_times(session, driver):
-    laps = session.laps.pick_driver(driver).copy()
+    laps = session.laps.pick_drivers(driver).copy()
     laps["LapTimeSec"] = laps["LapTime"].dt.total_seconds()
     laps = laps.dropna(subset=["LapTimeSec"])
 
