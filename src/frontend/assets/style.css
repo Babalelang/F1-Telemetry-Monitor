@@ -1,0 +1,503 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --red:       #E8002D;
+  --red-glow:  rgba(232,0,45,0.15);
+  --border:    rgba(255,255,255,0.10);
+  --border-sm: rgba(255,255,255,0.06);
+  --soft:      rgba(255,255,255,0.04);
+  --radius:    14px;
+  --radius-sm: 8px;
+  --gap:       12px;
+  --mono:      'DM Mono', monospace;
+  --sans:      'DM Sans', sans-serif;
+  --text:      rgba(255,255,255,0.90);
+  --muted:     rgba(255,255,255,0.4);
+  --hint:      rgba(255,255,255,0.25);
+  --bg:        #0a0a0c;
+  --bg-input:  rgba(255,255,255,0.06);
+}
+
+body {
+  background: #080809;
+  font-family: var(--sans);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+#react-entry-point { min-height: 100vh; }
+
+/* ── Shell ────────────────────────────────────────────────────────────────── */
+.dash {
+  background: var(--bg);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  border-radius: 20px;
+  overflow: hidden;
+  min-height: 600px;
+  max-width: 1280px;
+  margin: 24px auto;
+}
+
+/* ── Topbar ───────────────────────────────────────────────────────────────── */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 24px 13px;
+  border-bottom: 0.5px solid var(--border);
+  background: rgba(255,255,255,0.02);
+}
+.topbar-left { display: flex; align-items: center; gap: 12px; }
+.session-pill {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--red-glow);
+  border: 0.5px solid rgba(232,0,45,0.35);
+  border-radius: 100px; padding: 4px 12px 4px 8px;
+}
+.live-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--red);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity:1;   transform:scale(1);   }
+  50%      { opacity:0.5; transform:scale(0.8); }
+}
+.session-label {
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  color: rgba(255,255,255,0.65); letter-spacing: 0.04em;
+}
+.gp-title { font-size: 14px; font-weight: 500; color: var(--text); }
+.lap-counter {
+  font-family: var(--mono); font-size: 22px; font-weight: 500;
+  color: #fff; letter-spacing: -0.02em;
+}
+.lap-sub { font-size: 10px; color: var(--muted); font-family: var(--mono); letter-spacing: 0.06em; margin-bottom: 2px; }
+.weather-badges { display: flex; gap: 6px; align-items: center; }
+.weather-pill {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  background: var(--soft); border: 0.5px solid var(--border);
+  border-radius: 100px; padding: 3px 10px; letter-spacing: 0.02em;
+}
+
+/* ── Nav tabs ─────────────────────────────────────────────────────────────── */
+.nav-tabs {
+  display: flex; gap: 2px;
+  padding: 10px 24px 0;
+  border-bottom: 0.5px solid var(--border);
+}
+.tab-btn {
+  font-family: var(--sans); font-size: 12px; font-weight: 400;
+  color: var(--muted); background: none; border: none; cursor: pointer;
+  padding: 6px 14px 10px;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover  { color: rgba(255,255,255,0.7); }
+.tab-btn.active { color: #fff; border-bottom-color: var(--red); font-weight: 500; }
+
+/* ── Content / panels ─────────────────────────────────────────────────────── */
+.content { padding: 16px 24px 20px; }
+.panel        { display: none; }
+.panel.active { display: block; animation: fadeIn 0.2s ease; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+
+/* ── Session form layout ──────────────────────────────────────────────────── */
+.loader-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: var(--gap); margin-bottom: 14px;
+}
+.loader-row {
+  display: flex; gap: var(--gap);
+  align-items: flex-end; margin-bottom: 0;
+}
+.field-group { display: flex; flex-direction: column; gap: 5px; }
+.field-label {
+  font-family: var(--mono); font-size: 10px; font-weight: 500;
+  color: rgba(255,255,255,0.32); letter-spacing: 0.1em; text-transform: uppercase;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DROPDOWN DARK THEME — NUCLEAR EDITION
+   Dash 2.x / react-select v5 injects inline style="background-color:white"
+   deep into the DOM. CSS !important on every selector is the only fix.
+   The MENU is a React portal appended to <body>, so we use global selectors.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Wrapper */
+.f1-dropdown {
+  position: relative;
+  font-family: var(--mono) !important;
+  font-size: 13px !important;
+}
+
+/* ── Control box (closed state) ── */
+.f1-dropdown > div,
+.f1-dropdown .Select-control {
+  background:    #050508 !important;
+  border:        1px solid rgba(255,255,255,0.18) !important;
+  border-radius: var(--radius-sm) !important;
+  min-height:    40px !important;
+  box-shadow:    none !important;
+  cursor:        pointer !important;
+  transition:    border-color 0.15s, background 0.15s;
+}
+.f1-dropdown > div:hover {
+  border-color: rgba(232,0,45,0.55) !important;
+  background:   rgba(232,0,45,0.07) !important;
+}
+.f1-dropdown > div:focus-within {
+  border-color: rgba(232,0,45,0.7) !important;
+  background:   rgba(232,0,45,0.09) !important;
+  box-shadow:   none !important;
+  outline:      none !important;
+}
+
+/* Kill every white background Dash injects inside the control */
+.f1-dropdown *,
+.f1-dropdown input,
+.f1-dropdown textarea {
+  background-color: transparent !important;
+  background:       transparent !important;
+  color:            var(--text) !important;
+  font-family:      var(--mono) !important;
+  font-size:        13px !important;
+  border:           none !important;
+  box-shadow:       none !important;
+  outline:          none !important;
+}
+
+/* Selected value */
+.f1-dropdown [class*="singleValue"],
+.f1-dropdown .Select-value-label {
+  color: var(--dot-color, rgba(255,255,255,0.95)) !important;
+  font-family: var(--mono) !important;
+  font-size: 13px !important;
+}
+
+/* Placeholder */
+.f1-dropdown [class*="placeholder"],
+.f1-dropdown .Select-placeholder {
+  color: rgba(255,255,255,0.32) !important;
+  font-family: var(--mono) !important;
+}
+
+/* Input cursor */
+.f1-dropdown input {
+  caret-color: var(--text) !important;
+}
+
+/* Chevron */
+.f1-dropdown [class*="indicatorContainer"],
+.f1-dropdown .Select-arrow-zone {
+  color: rgba(255,255,255,0.4) !important;
+}
+.f1-dropdown [class*="indicatorSeparator"] {
+  display: none !important;
+}
+
+/* Value container padding */
+.f1-dropdown [class*="ValueContainer"],
+.f1-dropdown [class*="control"] > div:first-child {
+  padding: 2px 10px !important;
+}
+
+/* ── MENU PORTAL (appended to <body> — outside .f1-dropdown) ── */
+/* These MUST be global. Use html body prefix for maximum specificity.        */
+
+html body div[class*="-menu"],
+html body div[class$="-menu"] {
+  background:    #111113 !important;
+  border:        1px solid rgba(255,255,255,0.18) !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow:    0 12px 40px rgba(0,0,0,0.8) !important;
+  z-index:       99999 !important;
+  overflow:      hidden !important;
+}
+
+html body div[class*="-MenuList"],
+html body div[class$="-MenuList"] {
+  background:      transparent !important;
+  padding:         4px !important;
+  max-height:      260px !important;
+  overflow-y:      auto !important;
+  display:         flex !important;
+  flex-direction:  column !important;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+html body div[class*="-MenuList"]::-webkit-scrollbar { width: 3px; }
+html body div[class*="-MenuList"]::-webkit-scrollbar-track { background: transparent; }
+html body div[class*="-MenuList"]::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+/* Options */
+html body div[class*="-option"],
+html body div[class$="-option"] {
+  background:    transparent !important;
+  color:         var(--dot-color, rgba(255,255,255,0.72)) !important;
+  font-family:   'DM Mono', monospace !important;
+  font-size:     13px !important;
+  padding:       9px 12px !important;
+  border-radius: 5px !important;
+  cursor:        pointer !important;
+  transition:    background 0.1s, color 0.1s;
+  display:       flex !important;
+  align-items:   center !important;
+  gap:           9px !important;
+}
+
+/* Team colour dot via CSS var set by teamdots.js */
+html body div[class*="-option"]::before,
+html body div[class$="-option"]::before {
+  content:       "" !important;
+  display:       inline-block !important;
+  width:         8px !important; height: 8px !important;
+  border-radius: 50% !important;
+  flex-shrink:   0 !important;
+  background:    var(--dot-color, rgba(255,255,255,0.18)) !important;
+}
+
+html body div[class*="-option"]:hover,
+html body div[class*="option--is-focused"] {
+  background: rgba(255,255,255,0.10) !important;
+  color: #fff !important;
+}
+html body div[class*="option--is-selected"],
+html body div[class*="-option"][aria-selected="true"] {
+  background: rgba(232,0,45,0.22) !important;
+  color: #fff !important;
+  font-weight: 500 !important;
+}
+
+/* Group headings */
+html body div[class*="-GroupHeading"] {
+  color: rgba(255,255,255,0.3) !important;
+  font-family: 'DM Mono', monospace !important;
+  font-size: 10px !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  padding: 6px 12px 2px !important;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.load-btn {
+  font-family: var(--sans); font-size: 13px; font-weight: 600;
+  color: #fff; background: var(--red);
+  border: none; border-radius: var(--radius-sm);
+  padding: 10px 24px; cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  align-self: flex-end; white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+.load-btn:hover  { opacity: 0.88; }
+.load-btn:active { transform: scale(0.97); }
+
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.disabled-plots { opacity: 0.3; pointer-events: none; }
+
+.outline-btn {
+  font-family: var(--sans); font-size: 12px; font-weight: 400;
+  color: rgba(255,255,255,0.6); background: none;
+  border: 0.5px solid rgba(255,255,255,0.16);
+  border-radius: var(--radius-sm); padding: 6px 14px; cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.outline-btn:hover  { background: rgba(255,255,255,0.08); color: #fff; }
+.outline-btn.active { border-color: var(--red); color: #FF4C5E; background: var(--red-glow); }
+
+/* ── Stats grid ───────────────────────────────────────────────────────────── */
+.stats-section {
+  margin-top: 22px; padding: 16px;
+  background: var(--soft); border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+}
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.stat-card {
+  background: rgba(255,255,255,0.04); border: 0.5px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+}
+.stat-label {
+  font-family: var(--mono); font-size: 10px; font-weight: 500;
+  color: rgba(255,255,255,0.3); letter-spacing: 0.08em;
+  text-transform: uppercase; margin-bottom: 4px;
+}
+.stat-val   { font-family: var(--mono); font-size: 18px; font-weight: 500; color: #fff; letter-spacing: -0.02em; }
+.stat-sub   { font-family: var(--mono); font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+.fastest-val { color: #34D399 !important; }
+
+/* ── Standings ────────────────────────────────────────────────────────────── */
+.standings-wrap { border: 0.5px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.standings-header {
+  display: grid; grid-template-columns: 28px 48px 1fr 52px 72px 82px 82px;
+  padding: 6px 14px; background: rgba(255,255,255,0.04);
+  border-bottom: 0.5px solid var(--border); gap: 8px;
+}
+.sh-cell { font-family: var(--mono); font-size: 10px; font-weight: 500; color: rgba(255,255,255,0.3); letter-spacing: 0.08em; text-transform: uppercase; }
+.scroll-region { max-height: 400px; overflow-y: auto; }
+.scroll-region::-webkit-scrollbar { width: 3px; }
+.scroll-region::-webkit-scrollbar-track { background: transparent; }
+.scroll-region::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
+
+.driver-row {
+  display: grid; grid-template-columns: 28px 48px 1fr 52px 72px 82px 82px;
+  padding: 7px 14px; gap: 8px;
+  border-bottom: 0.5px solid rgba(255,255,255,0.04);
+  cursor: pointer; transition: background 0.12s; align-items: center;
+  animation: fadeUp 0.25s ease both;
+}
+.driver-row:last-child { border-bottom: none; }
+.driver-row:hover      { background: rgba(255,255,255,0.04); }
+@keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+
+.pos-num    { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--muted); }
+.driver-tag { font-family: var(--mono); font-size: 12px; font-weight: 500; color: #fff; background: rgba(255,255,255,0.08); border-radius: 5px; padding: 2px 7px; text-align: center; }
+.driver-info { display: flex; flex-direction: column; gap: 1px; }
+.driver-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.team-name   { font-size: 10px; color: var(--hint); font-family: var(--mono); }
+.lap-time    { font-family: var(--mono); font-size: 12px; color: rgba(255,255,255,0.75); text-align: right; }
+.lap-time.best    { color: #A78BFA; }
+.lap-time.fastest { color: #34D399; }
+.gap-val     { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; }
+
+/* Tyre badges */
+.tyre-badge { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; font-family: var(--mono); font-size: 10px; font-weight: 500; }
+.tyre-S { background: rgba(220,38,38,0.25);  color: #FCA5A5; border: 0.5px solid rgba(220,38,38,0.4); }
+.tyre-M { background: rgba(234,179,8,0.2);   color: #FDE68A; border: 0.5px solid rgba(234,179,8,0.3); }
+.tyre-H { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); border: 0.5px solid rgba(255,255,255,0.2); }
+.tyre-I { background: rgba(16,185,129,0.2);  color: #6EE7B7; border: 0.5px solid rgba(16,185,129,0.3); }
+.tyre-W { background: rgba(59,130,246,0.2);  color: #93C5FD; border: 0.5px solid rgba(59,130,246,0.3); }
+
+/* Empty state */
+.empty-state { text-align: center; padding: 40px 20px; color: var(--hint); font-size: 13px; font-family: var(--mono); letter-spacing: 0.04em; }
+.empty-state .icon { font-size: 28px; margin-bottom: 10px; opacity: 0.5; display: block; }
+
+/* ── Track panel ──────────────────────────────────────────────────────────── */
+.track-panel { display: flex; gap: 16px; }
+.track-svg-wrap {
+  flex: 1; background: rgba(0,0,0,0.3); border: 0.5px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+  min-height: 320px; display: flex; align-items: stretch; justify-content: center;
+}
+/* Force the Plotly graph div inside to fill the container */
+.track-svg-wrap .js-plotly-plot,
+.track-svg-wrap .plot-container,
+.track-svg-wrap > div { width: 100% !important; height: 100% !important; }
+
+.track-side      { width: 178px; display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; }
+.sector-row      { display: flex; gap: 4px; margin-top: 6px; }
+.sector-col      { flex: 1; text-align: center; }
+.sec-label       { font-family: var(--mono); font-size: 14px; font-weight: 500; }
+.sec-val         { font-size: 10px; font-family: var(--mono); color: var(--hint); margin-top: 2px; }
+.sec-1           { color: #A78BFA; }
+.sec-2           { color: #34D399; }
+.sec-3           { color: #FBBF24; }
+.sector-bands    { display: flex; height: 4px; border-radius: 2px; overflow: hidden; margin-top: 8px; }
+.sb   { flex: 1; }
+.sb-1 { background: #A78BFA; }
+.sb-2 { background: #34D399; }
+.sb-3 { background: #FBBF24; }
+
+/* ── Chart panels ─────────────────────────────────────────────────────────── */
+.chart-wrap {
+  background: rgba(0,0,0,0.2); border: 0.5px solid var(--border);
+  border-radius: var(--radius); padding: 14px 14px 8px; height: 270px;
+}
+.chart-title {
+  font-family: var(--mono); font-size: 10px; font-weight: 500;
+  color: rgba(255,255,255,0.3); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px;
+}
+
+/* ── Compare panel ────────────────────────────────────────────────────────── */
+.compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); margin-bottom: 14px; }
+.driver-select-card { background: var(--soft); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.ds-header   { display: flex; align-items: center; gap: 8px; }
+.ds-label    { font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.85); }
+.cmp-lap-time { font-family: var(--mono); font-size: 22px; font-weight: 500; color: #fff; letter-spacing: -0.02em; }
+.cmp-sectors { display: flex; justify-content: space-between; margin-top: 4px; }
+
+.circuit-description {
+  color: rgba(255,255,255,0.7);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.team-hero { display: flex; flex-direction: column; gap: 6px; }
+.team-drivers { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.team-description { color: rgba(255,255,255,0.72); font-size: 13px; line-height: 1.5; }
+.team-stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.team-card { background: rgba(255,255,255,0.04); border: 0.5px solid var(--border); border-radius: var(--radius-sm); padding: 12px; }
+.team-color-dot { width: 12px; height: 12px; border-radius: 50%; }
+.team-badge { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; border-radius: 999px; font-family: var(--mono); font-size: 10px; font-weight: 700; }
+.team-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.team-lineup { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+/* ── Status bar ───────────────────────────────────────────────────────────── */
+.status-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 24px; border-top: 0.5px solid var(--border);
+  background: rgba(255,255,255,0.01);
+}
+.status-dot         { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.status-dot.ready   { background: #34D399; }
+.status-dot.loading { background: #F59E0B; animation: pulse 1s ease-in-out infinite; }
+.status-dot.idle    { background: rgba(255,255,255,0.18); }
+.status-text        { font-family: var(--mono); font-size: 10px; color: var(--hint); letter-spacing: 0.05em; }
+.mini-sectors { display: flex; gap: 3px; }
+.mini-sec     { width: 8px; height: 8px; border-radius: 2px; background: rgba(255,255,255,0.12); }
+.mini-sec.p   { background: #A78BFA; }
+.mini-sec.f   { background: #34D399; }
+.mini-sec.y   { background: #FBBF24; }
+
+/* ── Race Replay ──────────────────────────────────────────────────────────── */
+.replay-wrap {
+  position: relative;
+  background: rgba(0,0,0,0.3); border: 0.5px solid var(--border);
+  border-radius: var(--radius); overflow: hidden; margin-bottom: 14px;
+}
+.replay-hud {
+  position: absolute; top: 14px; left: 16px; pointer-events: none; z-index: 10;
+}
+.replay-lap-badge {
+  display: flex; align-items: baseline; gap: 5px;
+  background: rgba(10,10,12,0.82); border: 0.5px solid var(--border);
+  border-radius: 8px; padding: 5px 14px; backdrop-filter: blur(8px);
+}
+.replay-lap-label { font-family: var(--mono); font-size: 9px; font-weight: 500; color: rgba(255,255,255,0.35); letter-spacing: 0.1em; }
+.replay-lap-val   { font-family: var(--mono); font-size: 22px; font-weight: 500; color: #fff; letter-spacing: -0.02em; }
+.replay-lap-total { font-family: var(--mono); font-size: 12px; color: rgba(255,255,255,0.35); }
+
+.replay-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.replay-play     { white-space: nowrap; flex-shrink: 0; padding: 9px 20px; font-size: 13px; }
+.replay-scrub    { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+
+.replay-slider .rc-slider-track  { background: var(--red) !important; }
+.replay-slider .rc-slider-handle { border-color: var(--red) !important; background: var(--red) !important; box-shadow: 0 0 0 3px rgba(232,0,45,0.2) !important; }
+.replay-slider .rc-slider-rail   { background: rgba(255,255,255,0.1) !important; }
+
+.replay-legend { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 0 4px; border-top: 0.5px solid var(--border); }
+.replay-legend-chip {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.04); border: 0.5px solid var(--border);
+  border-radius: 100px; padding: 3px 10px;
+}
+
+/* ── Dash internals ───────────────────────────────────────────────────────── */
+._dash-loading-callback { background: transparent !important; }
+._dash-loading          { position: relative !important; }
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .loader-grid { grid-template-columns: 1fr 1fr; }
+  .stats-grid  { grid-template-columns: 1fr 1fr; }
+  .track-panel { flex-direction: column; }
+  .track-side  { width: 100%; flex-direction: row; flex-wrap: wrap; }
+  .track-side .stat-card { flex: 1; min-width: 140px; }
+}
+@media (max-width: 600px) {
+  .loader-grid  { grid-template-columns: 1fr; }
+  .compare-grid { grid-template-columns: 1fr; }
+  .standings-header,
+  .driver-row { grid-template-columns: 28px 44px 1fr 52px 82px; }
+  .standings-header > *:nth-child(5),
+  .driver-row       > *:nth-child(5) { display: none; }
+}

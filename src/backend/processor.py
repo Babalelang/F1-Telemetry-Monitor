@@ -53,7 +53,7 @@ def sector_time_analysis(session,driver):
 
 #Driver comparision
 def get_fastest_lap(session,driver):
-    laps = session.laps.pick_driverss(driver)
+    laps = session.laps.pick_drivers(driver)
     return laps.pick_fastest()
 
 def compare_telemetry(lap1,lap2):
