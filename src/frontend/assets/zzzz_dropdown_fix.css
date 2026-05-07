@@ -1,0 +1,179 @@
+/* zzzz_dropdown_fix.css - Dropdown Theme: lighter black, visible, matching box+menu */
+:root {
+  --dropdown-bg: #2a2e3a;
+  --dropdown-bg-hover: #343a4d;
+  --dropdown-menu: #2a2e3a;
+  --dropdown-text: #ffffff;
+  --dropdown-muted: rgba(255,255,255,0.58);
+  --dropdown-border: rgba(255,255,255,0.25);
+  --dropdown-accent: rgba(232,0,45,0.65);
+}
+
+.f1-dropdown,
+.dash-dropdown,
+.Select {
+  overflow: visible !important;
+  font-family: "JetBrains Mono", Consolas, monospace !important;
+}
+
+.f1-dropdown > div,
+.dash-dropdown {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.Select-control {
+  height: 42px !important;
+  min-height: 42px !important;
+  background: var(--dropdown-bg) !important;
+  background-color: var(--dropdown-bg) !important;
+  border: 1px solid var(--dropdown-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+  color: var(--dropdown-text) !important;
+  cursor: pointer !important;
+}
+
+.Select-control:hover,
+.Select.is-focused > .Select-control,
+.Select.is-open > .Select-control {
+  background: var(--dropdown-bg-hover) !important;
+  background-color: var(--dropdown-bg-hover) !important;
+  border-color: var(--dropdown-accent) !important;
+  box-shadow: 0 0 0 1px rgba(232,0,45,0.16) !important;
+}
+
+.Select-multi-value-wrapper,
+.Select-value,
+.Select-placeholder,
+.Select-input,
+.Select-input > input,
+.Select-input input {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.Select-value,
+.Select-placeholder {
+  color: var(--dropdown-text) !important;
+  line-height: 40px !important;
+  padding-left: 13px !important;
+  padding-right: 34px !important;
+}
+
+.Select-placeholder {
+  color: var(--dropdown-muted) !important;
+}
+
+.Select-value-label,
+.Select-value-label *,
+.Select-placeholder,
+.Select-input > input,
+.Select-input input {
+  color: var(--dropdown-text) !important;
+  -webkit-text-fill-color: var(--dropdown-text) !important;
+  opacity: 1 !important;
+}
+
+.Select-input {
+  height: 40px !important;
+  line-height: 40px !important;
+  padding-left: 13px !important;
+  padding-right: 34px !important;
+}
+
+.Select-input > input,
+.Select-input input {
+  height: 38px !important;
+  line-height: 38px !important;
+  caret-color: var(--dropdown-text) !important;
+}
+
+.Select-arrow-zone,
+.Select-clear-zone,
+.Select-loading-zone {
+  background: transparent !important;
+  color: rgba(255,255,255,0.72) !important;
+}
+
+.Select-arrow {
+  border-top-color: rgba(255,255,255,0.72) !important;
+}
+
+.Select-menu-outer {
+  margin-top: 8px !important;
+  background: var(--dropdown-menu) !important;
+  background-color: var(--dropdown-menu) !important;
+  border: 1px solid var(--dropdown-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 20px 70px rgba(0,0,0,0.78) !important;
+  color: var(--dropdown-text) !important;
+  overflow: hidden !important;
+  z-index: 999999 !important;
+}
+
+.Select-menu,
+.VirtualizedSelectGrid {
+  background: var(--dropdown-menu) !important;
+  background-color: var(--dropdown-menu) !important;
+  color: var(--dropdown-text) !important;
+}
+
+.Select-option,
+.VirtualizedSelectOption {
+  background: var(--dropdown-menu) !important;
+  background-color: var(--dropdown-menu) !important;
+  color: var(--dropdown-text) !important;
+  -webkit-text-fill-color: var(--dropdown-text) !important;
+  font-family: "JetBrains Mono", Consolas, monospace !important;
+  font-size: 13px !important;
+  padding: 10px 14px !important;
+}
+
+.Select-option.is-focused,
+.Select-option:hover,
+.VirtualizedSelectFocusedOption {
+  background: rgba(232,0,45,0.28) !important;
+  background-color: rgba(232,0,45,0.28) !important;
+  color: var(--dropdown-text) !important;
+}
+
+.Select-option.is-selected,
+.Select-option[aria-selected="true"] {
+  background: rgba(232,0,45,0.42) !important;
+  background-color: rgba(232,0,45,0.42) !important;
+  color: var(--dropdown-text) !important;
+}
+
+.Select-noresults,
+.Select-loading {
+  background: var(--dropdown-menu) !important;
+  background-color: var(--dropdown-menu) !important;
+  color: var(--dropdown-muted) !important;
+}
+
+div[class*="-control"] {
+  background: var(--dropdown-bg) !important;
+  background-color: var(--dropdown-bg) !important;
+  border-color: var(--dropdown-border) !important;
+  color: var(--dropdown-text) !important;
+}
+
+div[class*="-singleValue"],
+div[class*="-placeholder"],
+div[class*="-Input"] input {
+  color: var(--dropdown-text) !important;
+  -webkit-text-fill-color: var(--dropdown-text) !important;
+}
+
+div[class*="-menu"],
+div[class*="-MenuList"],
+div[class*="-option"] {
+  background: var(--dropdown-menu) !important;
+  background-color: var(--dropdown-menu) !important;
+  color: var(--dropdown-text) !important;
+}
