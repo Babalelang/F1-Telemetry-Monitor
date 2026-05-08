@@ -82,10 +82,11 @@ body {
   border: 1px solid rgba(232,0,45,0.28);
   border-radius: 100px; padding: 5px 14px 5px 10px;
 }
-.live-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--red); box-shadow: 0 0 8px rgba(232,0,45,0.8);
-  animation: pulse 1.6s ease-in-out infinite;
+
+.live-dot.ready {
+    animation: none;
+    background: #22c55e;   /* solid green — session loaded */
+    box-shadow: 0 0 6px #22c55e;
 }
 @keyframes pulse {
   0%,100% { opacity:1; transform:scale(1); box-shadow: 0 0 8px rgba(232,0,45,0.8); }
@@ -938,33 +939,12 @@ html body .Select-loading {
 .mini-sec.f   { background: #34D399; box-shadow: 0 0 6px rgba(52,211,153,0.4); }
 .mini-sec.y   { background: #FBBF24; box-shadow: 0 0 6px rgba(251,191,36,0.4); }
 
-/* ── Dash loading — centered spinner ──────────────────────────────────────── */
+/* ── Dash loading — centered spinner (HIDDEN) ──────────────────────────────── */
 ._dash-loading-callback {
-  position: fixed !important;
-  top: 50% !important;
-  left: 50% !important;
-  transform: translate(-50%, -50%) !important;
-  right: auto !important;
-  bottom: auto !important;
-  width: 56px !important;
-  height: 56px !important;
-  display: grid !important;
-  place-items: center !important;
-  background: rgba(6,6,10,0.85) !important;
-  border: 1px solid rgba(232,0,45,0.25) !important;
-  border-radius: 50% !important;
-  backdrop-filter: blur(8px) !important;
-  z-index: 100000 !important;
-  pointer-events: none !important;
+  display: none !important;
 }
 ._dash-loading-callback::after {
-  content: "";
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 3px solid rgba(255,255,255,0.12);
-  border-top-color: var(--red);
-  animation: spin 0.6s linear infinite;
+  display: none !important;
 }
 ._dash-loading { position: relative !important; }
 @keyframes spin { to { transform: rotate(360deg); } }

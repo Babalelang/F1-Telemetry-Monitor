@@ -32,6 +32,17 @@ def _get_session(year, gp, session_type):
         if key not in _SESSION_CACHE:
             sess = fastf1.get_session(year, gp, session_type)
             sess.load(laps=True, telemetry=True, weather=False, messages=False)
+            # Pre-load replay data to avoid blocking during playback
+            try:
+                if not hasattr(sess, 'pos_data') or sess.pos_data is None or len(sess.pos_data) == 0:
+                    sess.load_pos_data()
+            except Exception as e:
+                print(f"Warning: Could not pre-load pos_data: {e}")
+            try:
+                if not hasattr(sess, 'car_data') or sess.car_data is None or len(sess.car_data) == 0:
+                    sess.load_car_data()
+            except Exception as e:
+                print(f"Warning: Could not pre-load car_data: {e}")
             _SESSION_CACHE[key] = sess
         return _SESSION_CACHE[key]
 
@@ -192,7 +203,7 @@ def _build_track_map(session, driver):
 _REPLAY_CACHE = {}
 _REPLAY_CACHE_LOCK = threading.Lock()
 
-def _build_replay_data(session, max_frames: int = 200):
+def _build_replay_data(session, max_frames: int = 800):
     """Build replay data with aggressive downsampling for fast, smooth animation.
     max_frames=200 keeps data small so the browser renders quickly.
     """
@@ -201,7 +212,7 @@ def _build_replay_data(session, max_frames: int = 200):
         if cache_key in _REPLAY_CACHE:
             return _REPLAY_CACHE[cache_key]
 
-    SAMPLE = 16  # heavier downsampling for speed (was 8)
+    SAMPLE = 8  # heavier downsampling for speed (was 8)
     try:
         fp = session.laps.pick_fastest().get_pos_data()
         raw_ox = fp["X"].values.astype(float)
@@ -209,21 +220,8 @@ def _build_replay_data(session, max_frames: int = 200):
     except Exception:
         raw_ox = raw_oy = np.array([])
 
-    # Load position data - required for replay
-    try:
-        if not hasattr(session, 'pos_data') or session.pos_data is None or len(session.pos_data) == 0:
-            session.load_pos_data()
-    except Exception as e:
-        print(f"Warning: Could not load pos_data: {e}")
-        return None
-    
-    # Load car data for speed - optional, replay works without it
-    try:
-        if not hasattr(session, 'car_data') or session.car_data is None or len(session.car_data) == 0:
-            session.load_car_data()
-    except Exception:
-        pass
-
+    # Position and car data should already be pre-loaded by _get_session()
+    # No need to load them here — this keeps replay playback smooth
     drivers = session.laps["Driver"].dropna().unique().tolist()
     drv_dfs: dict = {}
     drv_speeds: dict = {}
@@ -492,10 +490,10 @@ def register_callbacks(app):
 
     # ── Tab switching ─────────────────────────────────────────────────────────
     PANELS = ["panel-session", "panel-standings", "panel-track",
-              "panel-telemetry", "panel-compare", "panel-analysis",
+              "panel-telemetry", "panel-compare",
               "panel-circuits", "panel-teams", "panel-replay", "panel-calendar"]
     TABS = ["tab-session", "tab-standings", "tab-track",
-            "tab-telemetry", "tab-compare", "tab-analysis",
+            "tab-telemetry", "tab-compare",
             "tab-circuits", "tab-teams", "tab-replay", "tab-calendar"]
 
     @app.callback(
@@ -616,7 +614,6 @@ def register_callbacks(app):
         Output("status-dot", "className"),
         Output("status-text", "children"),
         Output("standings-body", "children"),
-        Output("plot-btns", "className"),
         Output("total-laps-stat", "children"),
         Output("fastest-stat", "children"),
         Output("fastest-drv-stat", "children"),
@@ -638,7 +635,7 @@ def register_callbacks(app):
             return (None, session_type or "?", msg, "—/—", "— AIR", "— TRK", "— m/s",
                     "—", "—", "—", "—", "—", "—", "—", "—",
                     "status-dot idle", f"ERROR — {msg}", [html.Div(msg, className="empty-state")],
-                    "btn-row disabled-plots", "—", "—", "—",
+                    "—", "—", "—",
                     [], "VER", [], "HAM", [], None, "—", "—")
         try:
             session = _get_session(year, gp, session_type)
@@ -687,8 +684,16 @@ def register_callbacks(app):
         return (store, f"{session_type} \u00b7 {year}", gp_label, f"{total_laps}/{total_laps}",
                 air, track_w, wind, best, d1, avg, "driver avg", cons, "std dev (s)", worst, "driver",
                 "status-dot ready", f"SESSION READY — {year} {gp_label} {session_type}",
-                standings, "btn-row", total_laps, fl_time, fl_drv,
+                standings, total_laps, fl_time, fl_drv,
                 opts, d1, opts, d2, opts, d1, circuit_name, circuit_len)
+
+    # ── Plot buttons enable/disable (separate callback — avoids spinner lock) ──
+    @app.callback(
+        Output("plot-btns", "className"),
+        Input("store-session", "data"),
+    )
+    def toggle_plot_btns(store):
+        return "btn-row" if store else "btn-row disabled-plots"
 
     @app.callback(
         Output("track-map-graph", "figure"),
@@ -786,107 +791,153 @@ def register_callbacks(app):
         except Exception as e:
             return (_empty_fig(str(e)), "—", "—", *blank, default_dot, default_dot)
 
-    # ── Replay store (lazy load) ─────────────────────────────────────────────
+    # ── Replay: build frame data + legend when session loads ─────────────────
     @app.callback(
         Output("store-replay-data", "data"),
-        Output("replay-legend", "children"),
-        Output("replay-frame-slider", "max"),
-        Output("replay-lap-total", "children"),
+        Output("replay-legend",     "children"),
+        Output("replay-lap-total",  "children"),
         Input("store-session", "data"),
         prevent_initial_call=True,
     )
     def build_replay_store(store):
-        if not store: return None, [], 100, ""
+        empty = [html.Div("Load a session to start replay", className="empty-state")]
+        if not store:
+            return None, empty, ""
         try:
             session = _get_session(store["year"], store["gp"], store["session_type"])
-            data = _build_replay_data(session)
+            data    = _build_replay_data(session)
             if not data:
-                return None, [html.Div("Replay: Position data unavailable for this session", className="empty-state")], 100, ""
-            legend = [html.Div(className="replay-legend-chip", children=[
-                html.Div(className="replay-legend-chip-dot",
-                         style={"background": data["colors"].get(d, "#888"), "boxShadow": f'0 0 6px {data["colors"].get(d, "#888")}'}),
-                html.Span(d, className="replay-legend-chip-label"),
-            ]) for d in data["drivers"]]
-            return data, legend, max(0, data["total"] - 1), f"/ {data['total_laps']}"
+                return None, [html.Div("Position data unavailable", className="empty-state")], ""
+            legend = [
+                html.Div(className="replay-legend-chip", children=[
+                    html.Div(className="replay-legend-chip-dot",
+                             style={"background": data["colors"].get(d, "#888"),
+                                    "boxShadow": f'0 0 6px {data["colors"].get(d, "#888")}'}),
+                    html.Span(d, className="replay-legend-chip-label"),
+                ]) for d in data["drivers"]
+            ]
+            return data, legend, f"/ {data['total_laps']}"
         except Exception as e:
-            return None, [html.Div(f"Replay error: {str(e)[:80]}", className="empty-state")], 100, ""
+            return None, [html.Div(f"Error: {str(e)[:80]}", className="empty-state")], ""
 
-    @app.callback(
-        Output("replay-graph", "figure"),
-        Output("replay-lap-num", "children"),
-        Output("replay-time-val", "children"),
-        Output("replay-leaderboard-body", "children"),
+    # ── Clientside: inject frame data into the canvas iframe once ────────────
+    # Runs whenever store-replay-data changes — sends one postMessage, done.
+    app.clientside_callback(
+        """
+        function(replayData) {
+            if (!replayData) return window.dash_clientside.no_update;
+            function send() {
+                var iframe = document.getElementById('replay-iframe');
+                if (!iframe || !iframe.contentWindow) {
+                    setTimeout(send, 200);
+                    return;
+                }
+                iframe.contentWindow.postMessage({ type: 'LOAD', data: replayData }, '*');
+            }
+            // Small delay to let iframe finish loading on first use
+            setTimeout(send, 300);
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("replay-lap-num", "id"),  # harmless dummy — just needs an output
         Input("store-replay-data", "data"),
-        Input("replay-frame-slider", "value"),
         prevent_initial_call=True,
     )
-    def render_replay_frame(data, frame_idx):
-        if not data: return _empty_map("Load a session to see the race replay"), "—", "—:—:—", []
-        try:
-            idx = int(frame_idx or 0)
-            total = max(1, int(data.get("total", 1)))
-            laps = int(data.get("total_laps", 1))
-            frames = data.get("frames", [])
-            if not frames or idx >= len(frames):
-                return _empty_map("No replay data available"), "—", "—:—:—", []
-            lap_now = max(1, min(laps, int(idx / total * laps) + 1)) if laps else 1
-            frame_pos = min(idx, len(frames) - 1)
-            if frame_pos < 0 or frame_pos >= len(frames):
-                return _empty_map("Invalid frame index"), "—", "—:—:—", []
-            t_sec = float(frames[frame_pos].get("t", 0)) if frame_pos < len(frames) else 0
-            m = int(t_sec // 60)
-            s = int(t_sec % 60)
-            cs = int((t_sec % 1) * 100)
-            t_fmt = f"{m:02d}:{s:02d}.{cs:02d}"
-            leaderboard = _build_replay_leaderboard(data, idx)
-            return _replay_fig(data, idx), str(lap_now), t_fmt, leaderboard
-        except Exception as e:
-            return _empty_map(f"Replay error: {str(e)[:50]}"), "—", "—:—:—", []
 
-    @app.callback(
-        Output("replay-interval", "disabled"),
-        Output("store-replay-playing", "data"),
-        Output("replay-play-btn", "children"),
-        Input("replay-play-btn", "n_clicks"),
-        Input("replay-reset-btn", "n_clicks"),
-        Input("store-session", "data"),
-        State("store-replay-playing", "data"),
-        prevent_initial_call=True,
-    )
-    def toggle_replay(play_clicks, reset_clicks, store_session, is_playing):
-        triggered = ctx.triggered_id
-        if triggered == "replay-reset-btn":
-            return True, False, "\u25b6  PLAY"
-        if triggered == "store-session":
-            if not store_session:
-                return True, False, "\u25b6  PLAY"
-            return False, True, "\u23f8  PAUSE"
-        new_playing = not bool(is_playing)
-        return (not new_playing), new_playing, ("\u23f8  PAUSE" if new_playing else "\u25b6  PLAY")
+    # ── Clientside: wire play/reset buttons to iframe postMessage ────────────
+    app.clientside_callback(
+        """
+        function(playClicks, resetClicks) {
+            var ctx = dash_clientside.callback_context;
+            if (!ctx.triggered || ctx.triggered.length === 0)
+                return ["▶  PLAY", false];
 
-    @app.callback(
-        Output("replay-frame-slider", "value"),
-        Input("replay-interval", "n_intervals"),
+            var tid = ctx.triggered[0].prop_id.split('.')[0];
+            var iframe = document.getElementById('replay-iframe');
+            if (!iframe || !iframe.contentWindow)
+                return window.dash_clientside.no_update;
+
+            if (tid === 'replay-reset-btn') {
+                iframe.contentWindow.postMessage({ type: 'RESET' }, '*');
+                return ["▶  PLAY", false];
+            }
+
+            // Toggle play/pause — read current state from button text
+            var btn = document.getElementById('replay-play-btn');
+            var isPlaying = btn && btn.textContent.trim().startsWith('⏸');
+            if (isPlaying) {
+                iframe.contentWindow.postMessage({ type: 'PAUSE' }, '*');
+                return ["▶  PLAY", false];
+            } else {
+                iframe.contentWindow.postMessage({ type: 'PLAY' }, '*');
+                return ["⏸  PAUSE", true];
+            }
+        }
+        """,
+        Output("replay-play-btn",        "children"),
+        Output("store-replay-playing",   "data"),
+        Input("replay-play-btn",  "n_clicks"),
         Input("replay-reset-btn", "n_clicks"),
-        Input("store-session", "data"),
-        State("replay-frame-slider", "value"),
-        State("replay-frame-slider", "max"),
-        State("store-replay-playing", "data"),
         prevent_initial_call=True,
     )
-    def advance_frame(n_intervals, reset_clicks, store_session, current, max_val, is_playing):
-        triggered = ctx.triggered_id
-        if triggered in ("replay-reset-btn", "store-session"):
-            return 0
-        if not is_playing:
-            return no_update
-        # Jump 4 frames per tick for fast, smooth animation (50ms * 4 = 200ms per frame)
-        current_val = int(current or 0)
-        max_val_int = int(max_val or 100)
-        nxt = current_val + 4
-        if nxt >= max_val_int:
-            return 0  # Loop back to start
-        return nxt
+
+    # ── Clientside: listen for FRAME messages from iframe → update HUD + LB ──
+    app.clientside_callback(
+        """
+        function(_storeData) {
+            // Register listener once; guard with flag on window
+            if (window._f1ReplayListenerAttached) return window.dash_clientside.no_update;
+            window._f1ReplayListenerAttached = true;
+
+            window.addEventListener('message', function(e) {
+                var m = e.data;
+                if (!m || m.type !== 'FRAME') return;
+
+                // HUD
+                var lapEl  = document.getElementById('replay-lap-num');
+                var timeEl = document.getElementById('replay-time-val');
+                if (lapEl)  lapEl.textContent  = String(m.lap);
+                if (timeEl) timeEl.textContent = m.time;
+
+                // Leaderboard — reuse rows if count matches
+                var lb = document.getElementById('replay-leaderboard-body');
+                if (!lb || !m.leaderboard) return;
+                var rows = lb.querySelectorAll('.replay-lb-row');
+                if (rows.length === m.leaderboard.length) {
+                    m.leaderboard.forEach(function(r, i) {
+                        rows[i].querySelector('.replay-lb-pos').textContent   = String(i + 1);
+                        rows[i].querySelector('.replay-lb-drv').textContent   = r.drv;
+                        rows[i].querySelector('.replay-lb-speed').textContent = r.speed ? r.speed + ' km/h' : '—';
+                        var dot = rows[i].querySelector('.replay-lb-dot');
+                        if (dot) { dot.style.background = r.color; dot.style.boxShadow = '0 0 8px ' + r.color; }
+                    });
+                } else {
+                    lb.innerHTML = '';
+                    m.leaderboard.forEach(function(r, i) {
+                        var row = document.createElement('div');
+                        row.className = 'replay-lb-row';
+                        row.innerHTML =
+                            '<div class="replay-lb-pos">' + (i+1) + '</div>' +
+                            '<div class="replay-lb-dot" style="background:' + r.color + ';box-shadow:0 0 8px ' + r.color + '"></div>' +
+                            '<div class="replay-lb-drv">' + r.drv + '</div>' +
+                            '<div class="replay-lb-speed">' + (r.speed ? r.speed + ' km/h' : '—') + '</div>';
+                        lb.appendChild(row);
+                    });
+                }
+
+                // Reset play button when animation finishes
+                if (m.type === 'DONE') {
+                    var btn = document.getElementById('replay-play-btn');
+                    if (btn) btn.textContent = '▶  PLAY';
+                }
+            });
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("replay-time-val", "id"),   # harmless dummy
+        Input("store-replay-data", "data"),
+        prevent_initial_call=False,
+    )
 
     # ── Quick-plot buttons ─────────────────────────────────────────────────
     @app.callback(
