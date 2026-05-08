@@ -244,13 +244,7 @@ def _session_panel():
                                  value="R", clearable=False, searchable=False),
                 ]),
             ]),
-            html.Div(className="field-group", children=[
-                _label("Driver"),
-                html.Div(className="f1-dropdown", children=[
-                    dcc.Dropdown(id="sel-driver1-session",
-                                 options=drv_opts, value="VER", clearable=False),
-                ]),
-            ]),
+
         ]),
 
         html.Div(className="loader-row", style={"marginBottom": "24px"}, children=[
@@ -586,40 +580,38 @@ def _teams_panel():
 
 
 def _replay_panel():
-    """Cinematic race replay with glowing track map and sidebar leaderboard."""
+    """Race replay — canvas-based, zero Plotly roundtrips during animation."""
     return html.Div(id="panel-replay", className="panel", children=[
 
-        # ── Main layout: large track + sidebar ──────────────────────────
+        # ── Main layout: canvas track + sidebar ─────────────────────────
         html.Div(className="replay-main", children=[
 
-            # Glowing track map
-            html.Div(className="replay-track-container", children=[
-                dcc.Graph(
-                    id="replay-graph",
-                    config={"displayModeBar": False, "staticPlot": False},
-                    style={"height": "560px", "width": "100%"},
+            # Canvas iframe (full renderer lives inside)
+            html.Div(className="replay-track-container", style={"position": "relative"}, children=[
+                html.Iframe(
+                    id="replay-iframe",
+                    src="/assets/replay_canvas.html",
+                    style={
+                        "width": "100%", "height": "560px",
+                        "border": "none", "background": "transparent",
+                        "display": "block",
+                    },
                 ),
-                # HUD overlay
+                # HUD overlay (updated via postMessage listener below)
                 html.Div(className="replay-hud", children=[
                     html.Div(className="replay-lap-badge", children=[
                         html.Span("LAP", className="replay-lap-label"),
                         html.Span("—", id="replay-lap-num",   className="replay-lap-val"),
                         html.Span("",  id="replay-lap-total", className="replay-lap-total"),
                     ]),
-                    html.Div(className="replay-time-badge", id="replay-time-badge",
-                             children=[
-                                html.Span("TIME", className="replay-time-label"),
-                                html.Span("—", id="replay-time-val", className="replay-time-val"),
-                             ]),
-                    _graph_tooltip("RACE REPLAY",
-                                   "Animated replay of car positions on the track. "
-                                   "Each dot = a driver, color-coded by team. "
-                                   "The sidebar shows live order sorted by speed. "
-                                   "Press PLAY to animate, drag the slider to scrub."),
+                    html.Div(className="replay-time-badge", children=[
+                        html.Span("TIME", className="replay-time-label"),
+                        html.Span("—", id="replay-time-val", className="replay-time-val"),
+                    ]),
                 ]),
             ]),
 
-            # Sidebar leaderboard
+            # Sidebar leaderboard (updated by postMessage listener)
             html.Div(className="replay-sidebar", children=[
                 html.Div(className="replay-leaderboard", children=[
                     html.Div("LIVE ORDER", className="replay-lb-header"),
@@ -631,30 +623,25 @@ def _replay_panel():
             ]),
         ]),
 
-        # ── Controls ─────────────────────────────────────────────────────
+        # ── Controls: just Play/Reset + legend ───────────────────────────
         html.Div(className="replay-controls-wrap", children=[
             html.Div(className="replay-controls", children=[
-                html.Button("\u25b6  PLAY", id="replay-play-btn",
+                html.Button("▶  PLAY", id="replay-play-btn",
                             className="load-btn replay-play", n_clicks=0),
-                html.Button("\u23f9  RESET", id="replay-reset-btn",
+                html.Button("■  RESET", id="replay-reset-btn",
                             className="outline-btn", n_clicks=0),
-                html.Div(className="replay-scrub", children=[
-                    _label("Timeline"),
-                    dcc.Slider(id="replay-frame-slider", min=0, max=100,
-                               step=1, value=0, marks={},
-                               tooltip={"always_visible": False},
-                               className="replay-slider"),
-                ]),
             ]),
             html.Div(id="replay-legend", className="replay-legend"),
         ]),
 
-        # Hidden stores
+        # Hidden stores — keep same IDs so callbacks don't break
         dcc.Store(id="store-replay-data"),
         dcc.Store(id="store-replay-frame",   data=0),
         dcc.Store(id="store-replay-playing", data=False),
-        # Fast interval for smooth animation: 50ms ~ 20fps
-        dcc.Interval(id="replay-interval", interval=50, disabled=True),
+        # Interval kept (disabled) so existing callback refs don't error
+        dcc.Interval(id="replay-interval", interval=500, disabled=True),
+        # Dummy elements to satisfy any remaining callback outputs
+        html.Div(id="replay-frame-slider", style={"display": "none"}),
     ])
 
 
@@ -709,7 +696,7 @@ def build_layout():
             html.Div(className="topbar-left", children=[
                 html.Div("F1", className="topbar-brand"),
                 html.Div(className="session-pill", children=[
-                    html.Div(className="live-dot"),
+                    html.Div(className="live-dot", id="live-dot"),
                     html.Span("NO SESSION", id="session-type-label",
                               className="session-label"),
                 ]),
