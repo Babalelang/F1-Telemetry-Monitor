@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 import fastf1
 fastf1.Cache.enable_cache("./cache")
 
-from src.backend.processor import lap_time_analysis
+from src.backend.processor import lap_time_analysis, tyre_degradation, stint_strategy, compute_lap_delta
 from src.backend.comparator import compare_drivers
 from src.frontend.layout import CIRCUIT_INFO, TEAM_INFO
 
@@ -418,7 +418,7 @@ def _build_replay_leaderboard(data, frame_idx):
         ]))
     return rows
 
-def _build_standings(session):
+def _build_standings(session, focus_driver=None):
     try:
         laps = session.laps.copy()
         last = (laps.sort_values("LapNumber").groupby("Driver").last()
@@ -427,6 +427,7 @@ def _build_standings(session):
         rows = []
         for i, row in enumerate(last.itertuples()):
             drv = row.Driver
+            is_focused = focus_driver and drv == focus_driver
             pos = int(row.Position) if not pd.isna(row.Position) else i + 1
             comp = str(getattr(row, "Compound", "H"))
             ci = comp[0] if comp and comp != "nan" else "H"
@@ -436,16 +437,34 @@ def _build_standings(session):
             color = TEAM_COLORS.get(drv, "#888888")
             bs = _fmt_lap(best.total_seconds() if pd.notna(best) else None)
             ls = _fmt_lap(last_.total_seconds() if hasattr(last_, "total_seconds") else None)
-            rows.append(html.Div(className="driver-row", children=[
-                html.Span(str(pos), className="pos-num"),
-                html.Span(drv, className="driver-tag", style={"borderLeft": f"3px solid {color}", "paddingLeft": "7px"}),
+
+            row_class = "driver-row driver-row-focused" if is_focused else "driver-row"
+            row_style = {
+                "background": f"linear-gradient(90deg, {color}18, {color}06)",
+                "borderLeft": f"3px solid {color}",
+                "borderRadius": "8px",
+                "boxShadow": f"0 0 18px {color}22, inset 0 1px 0 {color}18",
+            } if is_focused else {}
+
+            focus_badge = html.Span("● FOCUS", className="focus-badge",
+                                    style={"color": color, "borderColor": color}) if is_focused else None
+
+            rows.append(html.Div(className=row_class, style=row_style, children=[
+                html.Span(str(pos), className="pos-num",
+                          style={"color": color, "fontWeight": "800"} if is_focused else {}),
+                html.Span(drv, className="driver-tag",
+                          style={"borderLeft": f"3px solid {color}", "paddingLeft": "7px",
+                                 "color": color, "fontWeight": "700"} if is_focused
+                          else {"borderLeft": f"3px solid {color}", "paddingLeft": "7px"}),
                 html.Div(className="driver-info", children=[
                     html.Span(drv, className="driver-name", style={"color": color}),
                     html.Span(getattr(row, "Team", ""), className="team-name"),
+                    focus_badge,
                 ]),
                 html.Div(html.Span(ci, className=f"tyre-badge tyre-{ci}"), style={"textAlign": "right"}),
                 html.Span("—", className="gap-val"),
-                html.Span(ls, className="lap-time"),
+                html.Span(ls, className="lap-time",
+                          style={"color": "rgba(255,255,255,0.9)"} if is_focused else {}),
                 html.Span(bs, className=f"lap-time {'fastest' if best == fl else 'best'}"),
             ]))
         return rows or [html.Div("No lap data", className="empty-state")]
@@ -625,18 +644,32 @@ def register_callbacks(app):
         Output("sel-tel-driver", "value"),
         Output("circuit-name", "children"),
         Output("circuit-len", "children"),
+        # focus driver banner outputs
+        Output("focus-driver-banner", "style"),
+        Output("focus-driver-dot", "style"),
+        Output("focus-driver-name", "children"),
+        Output("focus-best-lap", "children"),
+        Output("focus-avg-lap", "children"),
+        Output("focus-cons", "children"),
+        Output("focus-worst-lap", "children"),
+        # update sel-focus-driver options after load
+        Output("sel-focus-driver", "options"),
         Input("load-btn", "n_clicks"),
         State("sel-year", "value"), State("sel-gp", "value"),
         State("sel-session", "value"),
+        State("sel-focus-driver", "value"),
         prevent_initial_call=True,
     )
-    def load_session_cb(_, year, gp, session_type):
+    def load_session_cb(_, year, gp, session_type, focus_driver):
+        _no_banner = {"display": "none"}
+        _dot_default = {}
         def _err(msg):
             return (None, session_type or "?", msg, "—/—", "— AIR", "— TRK", "— m/s",
                     "—", "—", "—", "—", "—", "—", "—", "—",
                     "status-dot idle", f"ERROR — {msg}", [html.Div(msg, className="empty-state")],
                     "—", "—", "—",
-                    [], "VER", [], "HAM", [], None, "—", "—")
+                    [], "VER", [], "HAM", [], None, "—", "—",
+                    _no_banner, _dot_default, "—", "—", "—", "—", "—", [])
         try:
             session = _get_session(year, gp, session_type)
         except Exception as e:
@@ -655,14 +688,43 @@ def register_callbacks(app):
         d1 = actual[0] if len(actual) > 0 else "VER"
         d2 = actual[1] if len(actual) > 1 else actual[0] if len(actual) > 0 else "HAM"
 
+        # Stats driver: focus_driver if set and present in session, else d1
+        stats_driver = focus_driver if (focus_driver and focus_driver in actual) else d1
+
         try:
-            stats = lap_time_analysis(session, d1)
+            stats = lap_time_analysis(session, stats_driver)
             best = _fmt_lap(stats["best_lap"])
             avg = _fmt_lap(stats["average_lap"])
             cons = f"{stats['consistency_std']:.3f}s"
             worst = _fmt_lap(stats["worst_lap"])
         except Exception:
             best = avg = cons = worst = "—"
+
+        # Focus driver banner
+        focus_banner_style = {"display": "none"}
+        focus_dot_style = {}
+        focus_name = "—"
+        focus_best = focus_avg = focus_cons_val = focus_worst = "—"
+        if focus_driver and focus_driver in actual:
+            focus_color = TEAM_COLORS.get(focus_driver, "#888888")
+            focus_banner_style = {"display": "block"}
+            focus_dot_style = {
+                "background": focus_color,
+                "boxShadow": f"0 0 16px {focus_color}",
+                "width": "16px", "height": "16px",
+                "borderRadius": "50%", "flexShrink": "0",
+            }
+            focus_name = focus_driver
+            focus_best  = best
+            focus_avg   = avg
+            focus_cons_val = cons
+            focus_worst = worst
+
+        # Update sel-focus-driver options to actual drivers in this session
+        focus_opts = [{"label": d, "value": d} for d in actual]
+
+        standings = _build_standings(session, focus_driver=focus_driver if focus_driver in actual else None)
+        gp_label = gp.replace("_", " ").title() + " Grand Prix"
 
         try:
             total_laps = str(int(session.laps["LapNumber"].max()))
@@ -675,17 +737,86 @@ def register_callbacks(app):
         except Exception:
             fl_time = fl_drv = "—"
 
-        standings = _build_standings(session)
-        gp_label = gp.replace("_", " ").title() + " Grand Prix"
-        store = dict(year=year, gp=gp, session_type=session_type, driver1=d1, driver2=d2)
+        store = dict(year=year, gp=gp, session_type=session_type, driver1=stats_driver, driver2=d2,
+                     focus_driver=focus_driver if (focus_driver and focus_driver in actual) else None)
         circuit_name = CIRCUIT_INFO.get(gp, {}).get("name", gp_label)
         circuit_len = CIRCUIT_INFO.get(gp, {}).get("length", "—")
 
         return (store, f"{session_type} \u00b7 {year}", gp_label, f"{total_laps}/{total_laps}",
-                air, track_w, wind, best, d1, avg, "driver avg", cons, "std dev (s)", worst, "driver",
+                air, track_w, wind, best, stats_driver, avg, "driver avg", cons, "std dev (s)", worst, "driver",
                 "status-dot ready", f"SESSION READY — {year} {gp_label} {session_type}",
                 standings, total_laps, fl_time, fl_drv,
-                opts, d1, opts, d2, opts, d1, circuit_name, circuit_len)
+                opts, d1, opts, d2, opts, stats_driver, circuit_name, circuit_len,
+                focus_banner_style, focus_dot_style, focus_name,
+                focus_best, focus_avg, focus_cons_val, focus_worst, focus_opts)
+
+    @app.callback(
+        Output("focus-driver-banner",  "style",    allow_duplicate=True),
+        Output("focus-driver-dot",     "style",    allow_duplicate=True),
+        Output("focus-driver-name",    "children", allow_duplicate=True),
+        Output("focus-best-lap",       "children", allow_duplicate=True),
+        Output("focus-avg-lap",        "children", allow_duplicate=True),
+        Output("focus-cons",           "children", allow_duplicate=True),
+        Output("focus-worst-lap",      "children", allow_duplicate=True),
+        Output("stat-best",            "children", allow_duplicate=True),
+        Output("stat-best-drv",        "children", allow_duplicate=True),
+        Output("stat-avg",             "children", allow_duplicate=True),
+        Output("stat-cons",            "children", allow_duplicate=True),
+        Output("stat-worst",           "children", allow_duplicate=True),
+        Output("store-session",        "data",     allow_duplicate=True),
+        Output("standings-body",       "children", allow_duplicate=True),
+        Input("sel-focus-driver", "value"),
+        State("store-session", "data"),
+        prevent_initial_call=True,
+    )
+    def update_focus_driver(focus_driver, store):
+        no_banner = {"display": "none"}
+        dot_empty = {}
+        if not store:
+            return no_banner, dot_empty, "—", "—", "—", "—", "—", no_update, no_update, no_update, no_update, no_update, no_update, no_update
+        try:
+            session = _get_session(store["year"], store["gp"], store["session_type"])
+            actual = sorted(session.laps["Driver"].dropna().unique().tolist())
+        except Exception:
+            return no_banner, dot_empty, "—", "—", "—", "—", "—", no_update, no_update, no_update, no_update, no_update, no_update, no_update
+
+        stats_driver = focus_driver if (focus_driver and focus_driver in actual) else store.get("driver1", actual[0] if actual else "VER")
+
+        try:
+            stats = lap_time_analysis(session, stats_driver)
+            best = _fmt_lap(stats["best_lap"])
+            avg  = _fmt_lap(stats["average_lap"])
+            cons = f"{stats['consistency_std']:.3f}s"
+            worst = _fmt_lap(stats["worst_lap"])
+        except Exception:
+            best = avg = cons = worst = "—"
+
+        if focus_driver and focus_driver in actual:
+            focus_color = TEAM_COLORS.get(focus_driver, "#888888")
+            banner_style = {"display": "block"}
+            dot_style = {
+                "background": focus_color,
+                "boxShadow": f"0 0 16px {focus_color}",
+                "width": "16px", "height": "16px",
+                "borderRadius": "50%", "flexShrink": "0",
+            }
+            f_name = focus_driver
+            f_best, f_avg, f_cons, f_worst = best, avg, cons, worst
+        else:
+            banner_style = {"display": "none"}
+            dot_style = {}
+            f_name = "—"
+            f_best = f_avg = f_cons = f_worst = "—"
+
+        new_store = {**store, "driver1": stats_driver,
+                     "focus_driver": focus_driver if (focus_driver and focus_driver in actual) else None}
+
+        # Rebuild standings with highlight
+        focused = focus_driver if (focus_driver and focus_driver in actual) else None
+        standings = _build_standings(session, focus_driver=focused)
+
+        return (banner_style, dot_style, f_name, f_best, f_avg, f_cons, f_worst,
+                best, stats_driver, avg, cons, worst, new_store, standings)
 
     # ── Plot buttons enable/disable (separate callback — avoids spinner lock) ──
     @app.callback(
@@ -704,13 +835,16 @@ def register_callbacks(app):
         if not store: return _empty_map("Load a session first")
         try:
             sess = _get_session(store["year"], store["gp"], store["session_type"])
-            return _build_track_map(sess, store["driver1"])
+            driver = store.get("focus_driver") or store["driver1"]
+            return _build_track_map(sess, driver)
         except Exception as e:
             return _empty_map(f"Track map error: {e}")
 
     @app.callback(
         Output("tel-graph", "figure"),
         Output("tel-chart-title", "children"),
+        Output("tel-tyre-graph", "figure"),
+        Output("tel-stint-summary", "children"),
         Input("store-session", "data"),
         Input("sel-tel-driver", "value"),
         Input("btn-tel-speed", "n_clicks"),
@@ -720,8 +854,9 @@ def register_callbacks(app):
         prevent_initial_call=True,
     )
     def update_telemetry(store, tel_driver, sp, th, br, ge):
-        if not store: return _empty_fig("Load a session first"), "—"
-        driver = tel_driver or store.get("driver1", "VER")
+        if not store:
+            return _empty_fig("Load a session first"), "—", _empty_fig("Load a session first"), "Load a session to see stint strategy"
+        driver = tel_driver or store.get("focus_driver") or store.get("driver1", "VER")
         cmap = {
             "btn-tel-speed": ("Speed", "Speed (km/h)", "#E8002D"),
             "btn-tel-throttle": ("Throttle", "Throttle (%)", "#34D399"),
@@ -743,9 +878,49 @@ def register_callbacks(app):
                                      fill="tozeroy", fillcolor=hex_to_rgba(col),
                                      name=driver, hovertemplate=f"%{{y:.1f}}<extra>{driver}</extra>"))
             fig.update_layout(**_base_layout(y_title=yl))
-            return fig, f"{yl} — {driver}"
+
+            tyre_fig = _empty_fig("No tyre degradation data")
+            try:
+                stints = tyre_degradation(sess, driver)
+                if stints:
+                    tyre_fig = go.Figure()
+                    for stint in stints:
+                        compound = stint.get("compound", "UNKNOWN")
+                        label = f"Stint {stint.get('stint')} {compound}"
+                        tyre_fig.add_trace(go.Scatter(
+                            x=stint.get("lap_nums", stint.get("tyre_life", [])),
+                            y=stint.get("lap_times", []),
+                            mode="lines+markers",
+                            line=dict(color=TYRE_COLORS.get(compound, "rgba(255,255,255,0.55)"), width=2),
+                            marker=dict(size=4, opacity=0.8),
+                            name=label,
+                            hovertemplate=f"{label}<br>Lap %{{x:.0f}}<br>%{{y:.3f}}s<extra></extra>"
+                        ))
+                    tyre_fig.update_layout(**_base_layout(y_title="Lap time (s)", x_title="Lap"))
+            except Exception:
+                tyre_fig = _empty_fig("Tyre degradation unavailable")
+
+            stint_summary = html.Div("No stint strategy data available")
+            try:
+                strategy = stint_strategy(sess)
+                driver_row = next((row for row in strategy if row["driver"] == driver), None)
+                if driver_row and driver_row.get("stints"):
+                    row_children = []
+                    for stint in driver_row["stints"]:
+                        compound = stint.get("compound", "UNKNOWN")
+                        if compound == "nan":
+                            compound = "UNKNOWN"
+                        row_children.append(html.Div(
+                            f"Stint {stint.get('stint')} — {compound} | {stint.get('start_lap')}–{stint.get('end_lap')} ({stint.get('laps')} laps)",
+                            style={"padding": "4px 0", "borderBottom": "1px solid rgba(255,255,255,0.08)"}
+                        ))
+                    stint_summary = html.Div(row_children)
+            except Exception:
+                stint_summary = html.Div("Stint strategy unavailable")
+
+            return fig, f"{yl} — {driver}", tyre_fig, stint_summary
         except Exception as e:
-            return _empty_fig(str(e)), f"Error: {e}"
+            return _empty_fig(str(e)), f"Error: {e}", _empty_fig(str(e)), html.Div(str(e))
 
     @app.callback(
         Output("cmp-graph", "figure"),
@@ -773,12 +948,16 @@ def register_callbacks(app):
             c1 = TEAM_COLORS.get(d1, "#E8002D")
             c2 = TEAM_COLORS.get(d2, "#3671C6")
             tel1, tel2, lap1, lap2 = compare_drivers(sess, d1, d2)
+            dist, delta = compute_lap_delta(lap1, lap2)
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=tel1["Distance"], y=tel1["Speed"], mode="lines",
-                                     line=dict(color=c1, width=2), name=d1))
-            fig.add_trace(go.Scatter(x=tel2["Distance"], y=tel2["Speed"], mode="lines",
-                                     line=dict(color=c2, width=2, dash="dot"), name=d2))
-            fig.update_layout(**_base_layout(y_title="Speed (km/h)"))
+            if dist and delta:
+                fig.add_trace(go.Scatter(x=dist, y=delta, mode="lines",
+                                         line=dict(color=c1, width=2),
+                                         name=f"{d1} - {d2}"))
+                fig.add_hline(y=0, line=dict(color="rgba(255,255,255,0.3)", dash="dash"))
+                fig.update_layout(**_base_layout(y_title="Delta (s)", x_title="Distance (m)"))
+            else:
+                fig = _empty_fig("Lap delta unavailable")
             d1l = _fmt_lap(lap1["LapTime"].total_seconds() if pd.notna(lap1["LapTime"]) else None)
             d2l = _fmt_lap(lap2["LapTime"].total_seconds() if pd.notna(lap2["LapTime"]) else None)
             d1s = [_fmt_sector(lap1.get(f"Sector{i}Time")) for i in [1,2,3]]

@@ -216,104 +216,216 @@ def _graph_tooltip(title, desc):
 # ── Panels ────────────────────────────────────────────────────────────────────
 
 def _session_panel():
-    drv_opts = _driver_options()
     return html.Div(id="panel-session", className="panel active", children=[
 
-        html.Div(className="loader-grid", children=[
-            html.Div(className="field-group", children=[
-                _label("Year"),
-                html.Div(className="f1-dropdown", children=[
-                    dcc.Dropdown(id="sel-year",
-                                 options=[{"label": str(y), "value": y} for y in YEARS],
-                                 value=_CURRENT_YEAR, clearable=False, searchable=False),
-                ]),
-            ]),
-            html.Div(className="field-group", children=[
-                _label("Grand Prix"),
-                html.Div(className="f1-dropdown", children=[
-                    dcc.Dropdown(id="sel-gp",
-                                 options=[{"label": v, "value": k} for k, v in GRP_MAP.items()],
-                                 value="japan", clearable=False),
-                ]),
-            ]),
-            html.Div(className="field-group", children=[
-                _label("Session"),
-                html.Div(className="f1-dropdown", children=[
-                    dcc.Dropdown(id="sel-session",
-                                 options=[{"label": SESSION_LABELS[s], "value": s} for s in SESSION_TYPES],
-                                 value="R", clearable=False, searchable=False),
+        # ── HERO + LOADER (side by side) ─────────────────────────────────────
+        html.Div(className="sh-layout", children=[
+
+            # Left: identity — 38% width
+            html.Div(className="sh-identity", children=[
+                html.Div("FORMULA 1 TELEMETRY", className="sh-eyebrow"),
+                html.Div("SELECT SESSION", className="sh-title", id="session-hero-title"),
+                html.Div(
+                    "Choose a Grand Prix, season and session type to begin analysis.",
+                    className="sh-subtitle", id="session-hero-sub",
+                ),
+                html.Div(className="sh-divider"),
+                html.Div(className="sh-status", children=[
+                    html.Div(className="sh-status-dot", id="session-hero-dot"),
+                    html.Span("AWAITING SESSION", id="session-hero-status",
+                              className="sh-status-label"),
                 ]),
             ]),
 
+            # Right: loader form — 62% width
+            html.Div(className="sh-form-card", children=[
+
+                # Three field columns + button
+                html.Div(className="sh-fields", children=[
+                    html.Div(className="sh-field", children=[
+                        html.Div("SEASON", className="sh-field-label"),
+                        html.Div(className="f1-dropdown", children=[
+                            dcc.Dropdown(
+                                id="sel-year",
+                                options=[{"label": str(y), "value": y} for y in YEARS],
+                                value=_CURRENT_YEAR, clearable=False, searchable=False,
+                            ),
+                        ]),
+                    ]),
+                    html.Div(className="sh-field sh-field-wide", children=[
+                        html.Div("GRAND PRIX", className="sh-field-label"),
+                        html.Div(className="f1-dropdown", children=[
+                            dcc.Dropdown(
+                                id="sel-gp",
+                                options=[{"label": v, "value": k} for k, v in GRP_MAP.items()],
+                                value="japan", clearable=False,
+                            ),
+                        ]),
+                    ]),
+                    html.Div(className="sh-field", children=[
+                        html.Div("SESSION TYPE", className="sh-field-label"),
+                        html.Div(className="f1-dropdown", children=[
+                            dcc.Dropdown(
+                                id="sel-session",
+                                options=[{"label": SESSION_LABELS[s], "value": s}
+                                         for s in SESSION_TYPES],
+                                value="R", clearable=False, searchable=False,
+                            ),
+                        ]),
+                    ]),
+                    html.Div(className="sh-field", children=[
+                        html.Div("FOCUS DRIVER", className="sh-field-label"),
+                        html.Div(className="f1-dropdown", children=[
+                            dcc.Dropdown(
+                                id="sel-focus-driver",
+                                options=[{"label": d, "value": d} for d in DRIVERS],
+                                value=None, clearable=True,
+                                placeholder="All drivers",
+                                searchable=True,
+                            ),
+                        ]),
+                    ]),
+                    html.Div(className="sh-field sh-field-btn", children=[
+                        html.Div("\u00a0", className="sh-field-label"),   # spacer
+                        html.Button("LOAD SESSION", id="load-btn",
+                                    className="load-btn sh-load-btn", n_clicks=0),
+                    ]),
+                ]),
+
+                # Quick plots strip inside the form card
+                html.Div(className="sh-qp-strip", children=[
+                    html.Div("QUICK PLOTS", className="sh-qp-label"),
+                    html.Div(id="plot-btns", className="sh-qp-btns disabled-plots", children=[
+                        html.Button("Speed Trace",    id="btn-speed-trace",
+                                    className="qp-btn", n_clicks=0),
+                        html.Button("Full Telemetry", id="btn-tel-panel",
+                                    className="qp-btn", n_clicks=0),
+                        html.Button("Lap Times",      id="btn-lap-times",
+                                    className="qp-btn", n_clicks=0),
+                        html.Button("Track Map",      id="btn-track-map",
+                                    className="qp-btn", n_clicks=0),
+                        html.Button("Tyre Usage",     id="btn-compounds",
+                                    className="qp-btn", n_clicks=0),
+                    ]),
+                ]),
+            ]),
         ]),
 
-        html.Div(className="loader-row", style={"marginBottom": "24px"}, children=[
-            html.Div(style={"flex": "1"}),
-            html.Button("Load Session", id="load-btn",
-                        className="load-btn", n_clicks=0),
-        ]),
-
-        html.Div(style={"marginTop": "4px"}, children=[
-            _label("Quick Plots"),
-            html.Div(id="plot-btns", className="btn-row disabled-plots",
-                     style={"marginTop": "12px"}, children=[
-                html.Button("Speed Trace",    id="btn-speed-trace",
-                            className="outline-btn", n_clicks=0),
-                html.Button("Full Telemetry", id="btn-tel-panel",
-                            className="outline-btn", n_clicks=0),
-                html.Button("Lap Times",      id="btn-lap-times",
-                            className="outline-btn", n_clicks=0),
-                html.Button("Track Map",      id="btn-track-map",
-                            className="outline-btn", n_clicks=0),
-                html.Button("Tyre Usage",     id="btn-compounds",
-                            className="outline-btn", n_clicks=0),
+        # ── STATS BAR ────────────────────────────────────────────────────────
+        html.Div(className="sstat-bar", children=[
+            html.Div(className="sstat-cell", children=[
+                html.Div("BEST LAP",     className="sstat-label"),
+                html.Div("—", id="stat-best",     className="sstat-val sstat-purple"),
+                html.Div("—", id="stat-best-drv", className="sstat-sub"),
+            ]),
+            html.Div(className="sstat-sep"),
+            html.Div(className="sstat-cell", children=[
+                html.Div("AVG LAP",      className="sstat-label"),
+                html.Div("—", id="stat-avg",      className="sstat-val"),
+                html.Div("—", id="stat-avg-sub",  className="sstat-sub"),
+            ]),
+            html.Div(className="sstat-sep"),
+            html.Div(className="sstat-cell", children=[
+                html.Div("CONSISTENCY",  className="sstat-label"),
+                html.Div("—", id="stat-cons",     className="sstat-val"),
+                html.Div("—", id="stat-cons-sub", className="sstat-sub"),
+            ]),
+            html.Div(className="sstat-sep"),
+            html.Div(className="sstat-cell", children=[
+                html.Div("WORST LAP",    className="sstat-label"),
+                html.Div("—", id="stat-worst",     className="sstat-val"),
+                html.Div("—", id="stat-worst-sub", className="sstat-sub"),
             ]),
         ]),
 
-        html.Div(className="stats-section", children=[
-            _label("Session Stats"),
-            html.Div(className="stats-grid", style={"marginTop": "16px"}, children=[
-                _stat_card("stat-best",  "stat-best-drv",  "Best Lap"),
-                _stat_card("stat-avg",   "stat-avg-sub",   "Avg Lap"),
-                _stat_card("stat-cons",  "stat-cons-sub",  "Consistency"),
-                _stat_card("stat-worst", "stat-worst-sub", "Worst Lap"),
+        # ── FOCUSED DRIVER BANNER (shown after load if a driver is selected) ──
+        html.Div(id="focus-driver-banner", className="focus-banner", style={"display": "none"},
+                 children=[
+            html.Div(className="focus-banner-inner", children=[
+                html.Div(className="focus-banner-left", children=[
+                    html.Div(id="focus-driver-dot", className="focus-driver-dot"),
+                    html.Div(className="focus-banner-text", children=[
+                        html.Div("FOCUS DRIVER", className="focus-eyebrow"),
+                        html.Div("—", id="focus-driver-name", className="focus-driver-code"),
+                    ]),
+                ]),
+                html.Div(className="focus-banner-stats", children=[
+                    html.Div(className="focus-stat", children=[
+                        html.Div("BEST LAP",    className="focus-stat-label"),
+                        html.Div("—", id="focus-best-lap",   className="focus-stat-val focus-purple"),
+                    ]),
+                    html.Div(className="focus-stat-sep"),
+                    html.Div(className="focus-stat", children=[
+                        html.Div("AVG LAP",     className="focus-stat-label"),
+                        html.Div("—", id="focus-avg-lap",    className="focus-stat-val"),
+                    ]),
+                    html.Div(className="focus-stat-sep"),
+                    html.Div(className="focus-stat", children=[
+                        html.Div("CONSISTENCY", className="focus-stat-label"),
+                        html.Div("—", id="focus-cons",       className="focus-stat-val"),
+                    ]),
+                    html.Div(className="focus-stat-sep"),
+                    html.Div(className="focus-stat", children=[
+                        html.Div("WORST LAP",   className="focus-stat-label"),
+                        html.Div("—", id="focus-worst-lap",  className="focus-stat-val"),
+                    ]),
+                ]),
+                html.Div("STATS LOCKED TO THIS DRIVER — ALL ANALYSIS MODULES FOLLOW",
+                         className="focus-banner-hint"),
             ]),
         ]),
 
-        # ── Analysis Modules — click to jump to tab ──────────────────────────
-        html.Div(className="dashboard-section modules-section",
-                 style={"marginTop": "24px"}, children=[
-            html.Div(className="section-head", children=[
-                html.Div("ANALYSIS MODULES", className="section-heading"),
+        # ── ANALYSIS MODULES ─────────────────────────────────────────────────
+        html.Div(className="amod-section", children=[
+            html.Div(className="amod-header", children=[
+                html.Div("ANALYSIS MODULES", className="amod-title"),
+                html.Div("Select a module to open", className="amod-hint"),
             ]),
-            html.Div(className="module-grid", children=[
-                html.Div(id="module-track-map", className="module-card",
-                         n_clicks=0, children=[
-                    html.Div("Track Map", className="module-title"),
-                    html.Div("View the circuit layout colored by speed.",
-                             className="module-copy"),
-                    html.Div("OPEN \u2192", className="module-action"),
+            html.Div(className="amod-grid", children=[
+
+                html.Div(id="module-track-map", className="amod-card", n_clicks=0, children=[
+                    html.Div(className="amod-card-top", children=[
+                        html.Div(className="amod-accent amod-accent-cyan"),
+                        html.Div("TRACK MAP", className="amod-card-label"),
+                    ]),
+                    html.Div("Circuit Layout", className="amod-card-name"),
+                    html.Div("Speed-colored circuit trace with corner annotations.",
+                             className="amod-card-desc"),
+                    html.Div("OPEN", className="amod-card-cta"),
                 ]),
-                html.Div(id="module-telemetry", className="module-card",
-                         n_clicks=0, children=[
-                    html.Div("Telemetry", className="module-title"),
-                    html.Div("Speed, throttle, brake & gear traces.",
-                             className="module-copy"),
-                    html.Div("OPEN \u2192", className="module-action"),
+
+                html.Div(id="module-telemetry", className="amod-card", n_clicks=0, children=[
+                    html.Div(className="amod-card-top", children=[
+                        html.Div(className="amod-accent amod-accent-green"),
+                        html.Div("TELEMETRY", className="amod-card-label"),
+                    ]),
+                    html.Div("Driver Data", className="amod-card-name"),
+                    html.Div("Speed, throttle, brake and gear traces across a lap.",
+                             className="amod-card-desc"),
+                    html.Div("OPEN", className="amod-card-cta"),
                 ]),
-                html.Div(id="module-compare", className="module-card",
-                         n_clicks=0, children=[
-                    html.Div("Driver Compare", className="module-title"),
-                    html.Div("Head-to-head fastest lap overlay.",
-                             className="module-copy"),
-                    html.Div("OPEN \u2192", className="module-action"),
+
+                html.Div(id="module-compare", className="amod-card", n_clicks=0, children=[
+                    html.Div(className="amod-card-top", children=[
+                        html.Div(className="amod-accent amod-accent-amber"),
+                        html.Div("COMPARE", className="amod-card-label"),
+                    ]),
+                    html.Div("Head to Head", className="amod-card-name"),
+                    html.Div("Overlay two drivers' fastest laps to find delta.",
+                             className="amod-card-desc"),
+                    html.Div("OPEN", className="amod-card-cta"),
                 ]),
-                html.Div(id="module-replay", className="module-card primary",
+
+                html.Div(id="module-replay", className="amod-card amod-card-primary",
                          n_clicks=0, children=[
-                    html.Div("Race Replay", className="module-title"),
-                    html.Div("Animated race positions on the track.",
-                             className="module-copy"),
-                    html.Div("OPEN \u2192", className="module-action"),
+                    html.Div(className="amod-card-top", children=[
+                        html.Div(className="amod-accent amod-accent-red"),
+                        html.Div("RACE REPLAY", className="amod-card-label"),
+                    ]),
+                    html.Div("Live Positions", className="amod-card-name"),
+                    html.Div("Animated car positions on the circuit with leaderboard.",
+                             className="amod-card-desc"),
+                    html.Div("OPEN", className="amod-card-cta"),
                 ]),
             ]),
         ]),
@@ -322,16 +434,46 @@ def _session_panel():
 
 def _standings_panel():
     return html.Div(id="panel-standings", className="panel", children=[
-        html.Div(className="standings-wrap", children=[
-            html.Div(className="standings-header", children=[
-                html.Span(c, className="sh-cell")
-                for c in ["P", "DRV", "Name", "Tyre", "Gap", "Last", "Best"]
+
+        # ── PAGE HEADER ───────────────────────────────────────────────────────
+        html.Div(className="stnd-page-header", children=[
+            html.Div(className="stnd-page-header-left", children=[
+                html.Div("LIVE SESSION", className="stnd-eyebrow"),
+                html.Div("RACE ORDER", className="stnd-page-title"),
             ]),
-            html.Div(id="standings-body", className="scroll-region", children=[
-                html.Div(className="empty-state", children=[
-                    html.Div("🏁", className="icon"),
-                    "Load a session to see race order",
+            html.Div(className="stnd-legend", children=[
+                html.Div(className="stnd-leg-item", children=[
+                    html.Div(className="stnd-leg-pip stnd-pip-purple"),
+                    html.Span("FASTEST LAP"),
                 ]),
+                html.Div(className="stnd-leg-item", children=[
+                    html.Div(className="stnd-leg-pip stnd-pip-green"),
+                    html.Span("PERSONAL BEST"),
+                ]),
+                html.Div(className="stnd-leg-item", children=[
+                    html.Div(className="stnd-leg-pip stnd-pip-dim"),
+                    html.Span("NORMAL"),
+                ]),
+            ]),
+        ]),
+
+        # ── STANDINGS BODY ────────────────────────────────────────────────────
+        # Callback fills #standings-body with .stnd-row divs
+        html.Div(id="standings-body", className="stnd-list", children=[
+
+            # ── Empty state ──────────────────────────────────────────────────
+            html.Div(className="stnd-empty", children=[
+                # Geometric "no data" graphic — pure CSS, no emoji
+                html.Div(className="stnd-empty-graphic", children=[
+                    html.Div(className="seg seg-1"),
+                    html.Div(className="seg seg-2"),
+                    html.Div(className="seg seg-3"),
+                    html.Div(className="seg seg-4"),
+                    html.Div(className="seg seg-5"),
+                ]),
+                html.Div("NO SESSION LOADED", className="stnd-empty-title"),
+                html.Div("Load a session from the Session tab to populate race order.",
+                         className="stnd-empty-body"),
             ]),
         ]),
     ])
@@ -431,6 +573,19 @@ def _telemetry_panel():
             html.Button("Gear",     id="btn-tel-gear",
                         className="outline-btn", n_clicks=0),
         ]),
+        html.Div(className="chart-wrap", style={"minHeight": "240px", "marginTop": "18px"}, children=[
+            html.Div(className="chart-title-row", children=[
+                html.Div("Tyre Degradation — Stint pace by compound",
+                         id="tel-tyre-title", className="chart-title"),
+                _graph_tooltip("TYRE DEGRADATION",
+                               "Lap times for each stint and compound. "
+                               "Use this to see how a tyre set evolves over the lap set."),
+            ]),
+            dcc.Graph(id="tel-tyre-graph", config={"displayModeBar": False},
+                      style={"height": "200px"}),
+        ]),
+        html.Div(id="tel-stint-summary",
+                 style={"marginTop": "12px", "fontSize": "13px", "lineHeight": "1.5", "color": "rgba(255,255,255,0.82)"}),
     ])
 
 
@@ -487,14 +642,12 @@ def _compare_panel():
         ]),
         html.Div(className="chart-wrap", style={"minHeight": "300px"}, children=[
             html.Div(className="chart-title-row", children=[
-                html.Div("Speed Overlay — Driver 1 vs Driver 2",
+                html.Div("Lap Delta — Driver 1 vs Driver 2",
                          className="chart-title"),
-                _graph_tooltip("DRIVER COMPARE",
-                               "Overlays two drivers' fastest-lap speed traces. "
-                               "Where one line is higher, that driver is faster "
-                               "at that point on track. Solid = Driver 1, "
-                               "dotted = Driver 2. Use this to spot braking and "
-                               "cornering differences."),
+                _graph_tooltip("LAP DELTA",
+                               "Shows the time gap between the two fastest laps as "
+                               "they progress around the circuit. Positive values mean "
+                               "Driver 1 is ahead."),
             ]),
             dcc.Graph(id="cmp-graph", config={"displayModeBar": False},
                       style={"height": "250px"}),

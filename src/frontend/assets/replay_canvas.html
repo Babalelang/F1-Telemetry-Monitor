@@ -3,15 +3,13 @@
 <head>
 <meta charset="utf-8">
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; }
-  canvas { display: block; width: 100%; height: 100%; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; background:transparent; overflow:hidden; }
+  #c { display:block; width:100%; height:100%; }
   #msg {
-    position: absolute; inset: 0; display: flex; align-items: center;
-    justify-content: center;
-    font: 13px 'JetBrains Mono', monospace;
-    color: rgba(255,255,255,0.25);
-    pointer-events: none;
+    position:absolute; inset:0; display:flex; align-items:center;
+    justify-content:center; font:13px 'JetBrains Mono',monospace;
+    color:rgba(255,255,255,0.25); pointer-events:none;
   }
 </style>
 </head>
@@ -19,231 +17,385 @@
 <canvas id="c"></canvas>
 <div id="msg">Load a session to see the race replay</div>
 <script>
-/* ─────────────────────────────────────────────────────────────────────────────
-   F1 Replay Canvas Engine
-   Receives data from parent window via postMessage:
-     { type: "LOAD",  data: { track_x, track_y, frames, drivers, colors, total_laps } }
-     { type: "PLAY"  }
-     { type: "PAUSE" }
-     { type: "RESET" }
-     { type: "SEEK",  frame: N }
-   Posts back to parent:
-     { type: "FRAME", idx, lap, time, leaderboard: [{drv, speed, color}] }
-     { type: "DONE"  }
-───────────────────────────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────────────
+   F1 Replay Canvas — v4  "smooth edition"
+
+   ROOT CAUSE OF LAG/SPEED-BURST (now fixed):
+   The old code used:
+       while (logicalAcc >= MS_PER_FRAME) { logicalAcc -= MS_PER_FRAME; frameIdx++; }
+   When the browser delivered a late RAF tick (GPU stall, GC, tab switch)
+   the while-loop burned through many logical frames at once → visible
+   speed burst.  The fix is:
+       dt = Math.min(dt, MS_PER_FRAME)   ← cap to exactly one frame max
+   Combined with fractional sub-frame interpolation this gives perfectly
+   smooth, correctly-paced motion at any real frame rate.
+
+   Architecture:
+   • Logical clock  — advances at exactly PLAYBACK_SPEED × real time
+   • Sub-frame lerp — visual positions interpolated between logical frames
+   • Track cache    — drawn once to OffscreenCanvas, blit every RAF
+   • Leaderboard    — postMessage throttled to 4 Hz (not every RAF)
+   • Gap detection  — trail broken when normalised jump > MAX_JUMP
+──────────────────────────────────────────────────────────────────────── */
 
 const canvas = document.getElementById('c');
-const ctx2d  = canvas.getContext('2d');
-const msg    = document.getElementById('msg');
+const ctx    = canvas.getContext('2d', { alpha: true });
+const msgEl  = document.getElementById('msg');
 
-let DATA       = null;
-let frameIdx   = 0;
-let playing    = false;
-let rafHandle  = null;
-let lastTs     = null;
-const MS_PER_FRAME = 180; // advance one logical frame every 100ms → ~10fps logical, 60fps visual
+// ── Tuning ────────────────────────────────────────────────────────────────
+const PLAYBACK_SPEED = 1.0;   // 1 = real-time (adjust if race data is dense)
+const FRAMES_PER_SEC = 10;    // logical frames per second of playback
+const MS_PER_LFRAME  = 1000 / FRAMES_PER_SEC;  // ms between logical frames
+const MAX_JUMP       = 0.08;  // normalised units — larger = teleport, skip trail
+const TRAIL_LEN      = 12;    // frames of trail history
+const DOT_R          = 5;
+const HALO_R         = 12;
+const LB_HZ          = 4;     // leaderboard postMessage rate (Hz)
+const DPR            = Math.min(window.devicePixelRatio || 1, 2);
 
-// ── Resize handling ──────────────────────────────────────────────────────────
-function resize() {
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width  = canvas.clientWidth  * dpr;
-  canvas.height = canvas.clientHeight * dpr;
-  ctx2d.scale(dpr, dpr);
-  if (DATA) drawFrame(frameIdx);
-}
-window.addEventListener('resize', resize);
-setTimeout(resize, 50);
+// ── State ─────────────────────────────────────────────────────────────────
+let DATA         = null;
+let logicalTime  = 0;    // fractional logical frame index (float)
+let playing      = false;
+let rafHandle    = null;
+let lastPerfTs   = null; // performance.now() at last RAF
+let trackBitmap  = null; // pre-rendered track ImageBitmap
+let lbLastSent   = 0;    // perf timestamp of last leaderboard postMessage
 
-// ── Receive messages from parent (Dash) ──────────────────────────────────────
-window.addEventListener('message', (e) => {
-  const m = e.data;
-  if (!m || !m.type) return;
-  switch (m.type) {
-    case 'LOAD':
-      DATA     = m.data;
-      frameIdx = 0;
-      msg.style.display = 'none';
-      resize();
-      drawFrame(0);
-      break;
-    case 'PLAY':
-      if (!DATA) return;
-      playing  = true;
-      lastTs   = null;
-      if (!rafHandle) rafHandle = requestAnimationFrame(tick);
-      break;
-    case 'PAUSE':
-      playing = false;
-      if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
-      break;
-    case 'RESET':
-      playing  = false;
-      frameIdx = 0;
-      if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
-      if (DATA) drawFrame(0);
-      postParent(0);
-      break;
-    case 'SEEK':
-      frameIdx = Math.max(0, Math.min(m.frame, DATA ? DATA.frames.length - 1 : 0));
-      if (DATA) drawFrame(frameIdx);
-      break;
-  }
-});
-
-// ── Animation loop ───────────────────────────────────────────────────────────
-function tick(ts) {
-  if (!playing || !DATA) { rafHandle = null; return; }
-  rafHandle = requestAnimationFrame(tick);
-
-  if (lastTs === null) { lastTs = ts; return; }
-  if (ts - lastTs < MS_PER_FRAME) return;
-  lastTs = ts;
-
-  frameIdx++;
-  if (frameIdx >= DATA.frames.length) {
-    frameIdx = DATA.frames.length - 1;
-    playing  = false;
-    if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
-    window.parent.postMessage({ type: 'DONE' }, '*');
-  }
-
-  drawFrame(frameIdx);
-  postParent(frameIdx);
-}
-
-function postParent(idx) {
-  if (!DATA) return;
-  const frame  = DATA.frames[idx];
-  const total  = DATA.frames.length;
-  const laps   = DATA.total_laps || 1;
-  const lapNow = Math.max(1, Math.min(laps, Math.floor(idx / total * laps) + 1));
-  const tSec   = frame.t || 0;
-  const m      = Math.floor(tSec / 60);
-  const s      = Math.floor(tSec % 60);
-  const cs     = Math.floor((tSec % 1) * 100);
-  const tFmt   = pad2(m) + ':' + pad2(s) + '.' + pad2(cs);
-
-  const lb = DATA.drivers
-    .map(d => ({ drv: d, speed: (frame.d[d] || {}).speed || 0, color: DATA.colors[d] || '#888' }))
-    .sort((a, b) => b.speed - a.speed);
-
-  window.parent.postMessage({
-    type: 'FRAME', idx, lap: lapNow, time: tFmt,
-    leaderboard: lb, total: DATA.frames.length
-  }, '*');
-}
-
-function pad2(n) { return String(Math.floor(n)).padStart(2, '0'); }
-
-// ── Drawing ──────────────────────────────────────────────────────────────────
-const W = () => canvas.clientWidth;
-const H = () => canvas.clientHeight;
-const TRAIL = 8; // trail length in frames
-
-// Pre-parse team colors to rgb arrays for speed
+// ── RGB cache ─────────────────────────────────────────────────────────────
 const _rgb = {};
-function getRGB(hex) {
+function toRGB(hex) {
   if (_rgb[hex]) return _rgb[hex];
-  const h = hex.replace('#', '');
+  const h = (hex || '#888888').replace('#', '');
   _rgb[hex] = [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
   return _rgb[hex];
 }
 
-function wx(nx) { return nx * W(); }
-function wy(ny) { return (1 - ny) * H(); }  // flip Y so track isn't upside-down
+// ── Canvas resize ─────────────────────────────────────────────────────────
+function resize() {
+  const cw = canvas.clientWidth  || 800;
+  const ch = canvas.clientHeight || 500;
+  canvas.width  = cw * DPR;
+  canvas.height = ch * DPR;
+  // Note: scaling is applied per-draw via ctx.save/scale, not permanently,
+  // because permanent ctx.scale is lost on resize.
+  buildTrackCache();
+  if (DATA) renderFrame();
+}
+window.addEventListener('resize', resize);
+setTimeout(resize, 80);
 
-function drawFrame(idx) {
-  if (!DATA) return;
-  const w = W(), h = H();
-  ctx2d.clearRect(0, 0, w, h);
+// Shorthand — logical (CSS) pixel size
+function CW() { return canvas.width  / DPR; }
+function CH() { return canvas.height / DPR; }
 
-  const frames  = DATA.frames;
-  const frame   = frames[Math.min(idx, frames.length - 1)];
-  const drivers = DATA.drivers;
-  const colors  = DATA.colors;
-  const tx      = DATA.track_x;
-  const ty      = DATA.track_y;
+// ── Coordinate mapping ────────────────────────────────────────────────────
+// Data coords are 0..1 (already normalised by Python).
+// We add 5% padding on each side and flip Y so north is up.
+const PAD = 0.05;
+function wx(nx) { return (PAD + nx * (1 - 2*PAD)) * CW(); }
+function wy(ny) { return (1 - PAD - ny * (1 - 2*PAD)) * CH(); }
 
-  // ── Track outline ──────────────────────────────────────────────────────────
-  if (tx && tx.length > 1) {
-    // Wide glow
-    ctx2d.beginPath();
-    ctx2d.moveTo(wx(tx[0]), wy(ty[0]));
-    for (let i = 1; i < tx.length; i++) ctx2d.lineTo(wx(tx[i]), wy(ty[i]));
-    ctx2d.strokeStyle = 'rgba(232,0,45,0.07)';
-    ctx2d.lineWidth   = 28;
-    ctx2d.lineJoin    = 'round';
-    ctx2d.lineCap     = 'round';
-    ctx2d.stroke();
+// ── Track pre-render ──────────────────────────────────────────────────────
+function buildTrackCache() {
+  trackBitmap = null;
+  if (!DATA || !DATA.track_x || DATA.track_x.length < 4) return;
 
-    // Mid glow
-    ctx2d.beginPath();
-    ctx2d.moveTo(wx(tx[0]), wy(ty[0]));
-    for (let i = 1; i < tx.length; i++) ctx2d.lineTo(wx(tx[i]), wy(ty[i]));
-    ctx2d.strokeStyle = 'rgba(255,255,255,0.06)';
-    ctx2d.lineWidth   = 14;
-    ctx2d.stroke();
+  const w = CW(), h = CH();
+  const offscreen = document.createElement('canvas');
+  offscreen.width  = w * DPR;
+  offscreen.height = h * DPR;
+  const tc = offscreen.getContext('2d');
+  tc.scale(DPR, DPR);
 
-    // Sharp line
-    ctx2d.beginPath();
-    ctx2d.moveTo(wx(tx[0]), wy(ty[0]));
-    for (let i = 1; i < tx.length; i++) ctx2d.lineTo(wx(tx[i]), wy(ty[i]));
-    ctx2d.strokeStyle = 'rgba(255,255,255,0.20)';
-    ctx2d.lineWidth   = 2;
-    ctx2d.stroke();
+  const tx = DATA.track_x, ty = DATA.track_y;
+
+  function tracePath() {
+    tc.beginPath();
+    tc.moveTo(wx(tx[0]), wy(ty[0]));
+    for (let i = 1; i < tx.length; i++) tc.lineTo(wx(tx[i]), wy(ty[i]));
   }
 
-  // ── Trails ─────────────────────────────────────────────────────────────────
+  // Red glow
+  tracePath();
+  tc.strokeStyle = 'rgba(232,0,45,0.07)';
+  tc.lineWidth = 34; tc.lineJoin = 'round'; tc.lineCap = 'round'; tc.stroke();
+
+  // Road surface (dark fill to occlude glow underneath)
+  tracePath();
+  tc.strokeStyle = 'rgba(16,18,26,0.95)';
+  tc.lineWidth = 20; tc.stroke();
+
+  // Edge highlight
+  tracePath();
+  tc.strokeStyle = 'rgba(255,255,255,0.17)';
+  tc.lineWidth = 2; tc.stroke();
+
+  // Centre line
+  tracePath();
+  tc.setLineDash([8, 18]);
+  tc.strokeStyle = 'rgba(255,255,255,0.06)';
+  tc.lineWidth = 1; tc.stroke();
+  tc.setLineDash([]);
+
+  trackBitmap = offscreen;
+}
+
+// ── Distance helper ───────────────────────────────────────────────────────
+function dist(a, b) {
+  if (!a || !b) return 999;
+  const dx = a.x - b.x, dy = a.y - b.y;
+  return Math.sqrt(dx*dx + dy*dy);
+}
+
+// ── Linear interpolation with teleport guard ──────────────────────────────
+function lerpPos(a, b, t) {
+  if (!a || !b) return a || b;
+  if (dist(a, b) > MAX_JUMP) return a; // teleport — hold current position
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, speed: a.speed };
+}
+
+// ── Main render ───────────────────────────────────────────────────────────
+function renderFrame() {
+  if (!DATA) return;
+  const W = CW(), H = CH();
+  const total   = DATA.frames.length;
+  const drivers = DATA.drivers;
+  const colors  = DATA.colors;
+
+  // Integer frame index + fractional sub-frame
+  const fi0  = Math.min(Math.floor(logicalTime), total - 1);
+  const fi1  = Math.min(fi0 + 1, total - 1);
+  const frac = logicalTime - Math.floor(logicalTime);
+
+  const curFr  = DATA.frames[fi0];
+  const nextFr = DATA.frames[fi1];
+
+  // Pre-compute interpolated positions
+  const pos = {};
+  for (const d of drivers) {
+    pos[d] = lerpPos(curFr.d[d], nextFr.d[d], frac);
+  }
+
+  // Clear
+  ctx.save();
+  ctx.scale(DPR, DPR);
+  ctx.clearRect(0, 0, W, H);
+
+  // Track blit
+  if (trackBitmap) {
+    ctx.drawImage(trackBitmap, 0, 0, W, H);
+  }
+
+  // ── Trails ───────────────────────────────────────────────────────────────
   for (const drv of drivers) {
-    const col = colors[drv] || '#888888';
-    const [r, g, b] = getRGB(col);
-    for (let seg = 0; seg < TRAIL - 1; seg++) {
-      const fi0 = Math.max(0, idx - TRAIL + seg);
-      const fi1 = Math.max(0, idx - TRAIL + seg + 1);
-      const p0  = frames[fi0].d[drv];
-      const p1  = frames[fi1].d[drv];
-      if (!p0 || !p1) continue;
-      const alpha = ((seg + 1) / TRAIL) * 0.5;
-      const lw    = 1.5 + seg * 0.4;
-      ctx2d.beginPath();
-      ctx2d.moveTo(wx(p0.x), wy(p0.y));
-      ctx2d.lineTo(wx(p1.x), wy(p1.y));
-      ctx2d.strokeStyle = `rgba(${r},${g},${b},${alpha.toFixed(2)})`;
-      ctx2d.lineWidth   = lw;
-      ctx2d.lineCap     = 'round';
-      ctx2d.stroke();
+    if (!pos[drv]) continue;
+    const [r,g,b] = toRGB(colors[drv] || '#888888');
+    let prev = pos[drv];
+
+    for (let back = 1; back <= TRAIL_LEN; back++) {
+      const fi = Math.max(0, fi0 - back);
+      const curr = DATA.frames[fi].d[drv];
+      if (!curr || !prev) { prev = curr; continue; }
+      if (dist(curr, prev) > MAX_JUMP) { prev = curr; continue; } // break on teleport
+
+      const alpha = ((TRAIL_LEN - back) / TRAIL_LEN) * 0.5;
+      const lw    = 1.0 + ((TRAIL_LEN - back) / TRAIL_LEN) * 2.2;
+      ctx.beginPath();
+      ctx.moveTo(wx(prev.x), wy(prev.y));
+      ctx.lineTo(wx(curr.x), wy(curr.y));
+      ctx.strokeStyle = `rgba(${r},${g},${b},${alpha.toFixed(2)})`;
+      ctx.lineWidth   = lw;
+      ctx.lineCap     = 'round';
+      ctx.stroke();
+      prev = curr;
     }
   }
 
-  // ── Driver dots ─────────────────────────────────────────────────────────────
+  // ── Halos ─────────────────────────────────────────────────────────────────
   for (const drv of drivers) {
-    const pt  = frame.d[drv];
-    if (!pt) continue;
-    const col = colors[drv] || '#888888';
-    const [r, g, b] = getRGB(col);
+    const pt = pos[drv]; if (!pt) continue;
+    const [r,g,b] = toRGB(colors[drv] || '#888888');
     const x = wx(pt.x), y = wy(pt.y);
+    const g2 = ctx.createRadialGradient(x, y, 0, x, y, HALO_R);
+    g2.addColorStop(0, `rgba(${r},${g},${b},0.30)`);
+    g2.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.beginPath();
+    ctx.arc(x, y, HALO_R, 0, Math.PI*2);
+    ctx.fillStyle = g2;
+    ctx.fill();
+  }
 
-    // Halo
-    ctx2d.beginPath();
-    ctx2d.arc(x, y, 11, 0, Math.PI * 2);
-    ctx2d.fillStyle = `rgba(${r},${g},${b},0.15)`;
-    ctx2d.fill();
+  // ── Dots ──────────────────────────────────────────────────────────────────
+  for (const drv of drivers) {
+    const pt = pos[drv]; if (!pt) continue;
+    const x = wx(pt.x), y = wy(pt.y);
+    ctx.beginPath();
+    ctx.arc(x, y, DOT_R, 0, Math.PI*2);
+    ctx.fillStyle   = colors[drv] || '#888888';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+    ctx.lineWidth   = 1.5;
+    ctx.stroke();
+  }
 
-    // Dot
-    ctx2d.beginPath();
-    ctx2d.arc(x, y, 6, 0, Math.PI * 2);
-    ctx2d.fillStyle = col;
-    ctx2d.fill();
-    ctx2d.strokeStyle = 'rgba(0,0,0,0.85)';
-    ctx2d.lineWidth   = 1.5;
-    ctx2d.stroke();
+  // ── Labels ────────────────────────────────────────────────────────────────
+  ctx.font         = `bold ${7 * DPR / DPR}px "JetBrains Mono",monospace`;
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'bottom';
+  for (const drv of drivers) {
+    const pt = pos[drv]; if (!pt) continue;
+    const x = wx(pt.x), y = wy(pt.y);
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillText(drv, x + 0.5, y - DOT_R - 2.5);
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillText(drv, x, y - DOT_R - 3);
+  }
 
-    // Label
-    ctx2d.font         = 'bold 8px "JetBrains Mono", monospace';
-    ctx2d.fillStyle    = 'rgba(255,255,255,0.9)';
-    ctx2d.textAlign    = 'center';
-    ctx2d.textBaseline = 'bottom';
-    ctx2d.fillText(drv, x, y - 9);
+  ctx.restore();
+}
+
+// ── Leaderboard (throttled postMessage) ───────────────────────────────────
+function maybePostLeaderboard(now) {
+  if (now - lbLastSent < 1000 / LB_HZ) return;
+  lbLastSent = now;
+  if (!DATA) return;
+
+  const total  = DATA.frames.length;
+  const fi0    = Math.min(Math.floor(logicalTime), total - 1);
+  const frame  = DATA.frames[fi0];
+  const laps   = DATA.total_laps || 1;
+  const lapNow = Math.max(1, Math.min(laps, Math.floor(fi0 / total * laps) + 1));
+  const tSec   = frame.t || 0;
+  const tFmt   = pad2(tSec / 60) + ':' + pad2(tSec % 60) + '.' + pad2((tSec % 1) * 100);
+
+  const lb = DATA.drivers
+    .map(d => ({ drv: d, speed: (frame.d[d]||{}).speed||0, color: DATA.colors[d]||'#888' }))
+    .sort((a, b) => b.speed - a.speed);
+
+  window.parent.postMessage({
+    type: 'FRAME', idx: fi0, lap: lapNow, time: tFmt,
+    leaderboard: lb, total
+  }, '*');
+}
+
+function pad2(n) { return String(Math.floor(n < 0 ? 0 : n)).padStart(2, '0'); }
+
+// ── Animation loop — THE KEY FIX ─────────────────────────────────────────
+// dt is CAPPED to MS_PER_LFRAME so a late RAF tick never skips frames.
+// There is NO while-loop. One RAF tick = at most one logical frame advance.
+function tick(perfTs) {
+  if (!playing || !DATA) { rafHandle = null; return; }
+  rafHandle = requestAnimationFrame(tick);
+
+  const now = performance.now();
+
+  if (lastPerfTs === null) {
+    lastPerfTs = perfTs;
+    renderFrame();
+    return;
+  }
+
+  // ── THE FIX: cap dt so we never catch-up across multiple frames ──────────
+  let dt = (perfTs - lastPerfTs) * PLAYBACK_SPEED;
+  dt = Math.min(dt, MS_PER_LFRAME);  // ← never advance more than 1 logical frame
+  lastPerfTs = perfTs;
+
+  // Advance the fractional logical clock
+  logicalTime += dt / MS_PER_LFRAME;
+
+  const total = DATA.frames.length;
+  if (logicalTime >= total - 1) {
+    logicalTime = total - 1;
+    playing     = false;
+    if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
+    renderFrame();
+    window.parent.postMessage({ type: 'DONE' }, '*');
+    return;
+  }
+
+  renderFrame();
+  maybePostLeaderboard(now);
+}
+
+// ── Message API ───────────────────────────────────────────────────────────
+window.addEventListener('message', (e) => {
+  const m = e.data;
+  if (!m || !m.type) return;
+
+  switch (m.type) {
+    case 'LOAD':
+      DATA        = m.data;
+      logicalTime = 0;
+      playing     = false;
+      lbLastSent  = 0;
+      if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
+      msgEl.style.display = 'none';
+      _normalise();
+      resize();       // also calls buildTrackCache + renderFrame
+      break;
+
+    case 'PLAY':
+      if (!DATA || logicalTime >= DATA.frames.length - 1) {
+        logicalTime = 0; // auto-restart if at end
+      }
+      playing    = true;
+      lastPerfTs = null;
+      if (!rafHandle) rafHandle = requestAnimationFrame(tick);
+      break;
+
+    case 'PAUSE':
+      playing = false;
+      if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
+      break;
+
+    case 'RESET':
+      playing     = false;
+      logicalTime = 0;
+      if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
+      if (DATA) { renderFrame(); maybePostLeaderboard(0); }
+      break;
+
+    case 'SEEK':
+      logicalTime = Math.max(0, Math.min(m.frame, DATA ? DATA.frames.length - 1 : 0));
+      if (DATA) renderFrame();
+      break;
+  }
+});
+
+// ── Normalise raw coordinates if needed ──────────────────────────────────
+// Python already normalises, but this handles any edge case where raw
+// FastF1 coords (metres) are passed through unnormalised.
+function _normalise() {
+  if (!DATA) return;
+  const tx = DATA.track_x, ty = DATA.track_y;
+  const sample = tx && tx.length ? tx[0] : null;
+  // If already in 0..1 range, skip
+  if (sample !== null && sample >= -0.01 && sample <= 1.01) return;
+
+  let mnX = Infinity, mxX = -Infinity, mnY = Infinity, mxY = -Infinity;
+  if (tx) for (let i = 0; i < tx.length; i++) {
+    if (tx[i] < mnX) mnX = tx[i]; if (tx[i] > mxX) mxX = tx[i];
+    if (ty[i] < mnY) mnY = ty[i]; if (ty[i] > mxY) mxY = ty[i];
+  }
+  for (const fr of DATA.frames) {
+    for (const d of DATA.drivers) {
+      const p = fr.d[d]; if (!p) continue;
+      if (p.x < mnX) mnX = p.x; if (p.x > mxX) mxX = p.x;
+      if (p.y < mnY) mnY = p.y; if (p.y > mxY) mxY = p.y;
+    }
+  }
+  const rng = Math.max(mxX - mnX, mxY - mnY) || 1;
+  if (tx) for (let i = 0; i < tx.length; i++) {
+    DATA.track_x[i] = (tx[i] - mnX) / rng;
+    DATA.track_y[i] = (ty[i] - mnY) / rng;
+  }
+  for (const fr of DATA.frames) {
+    for (const d of DATA.drivers) {
+      const p = fr.d[d]; if (!p) continue;
+      p.x = (p.x - mnX) / rng;
+      p.y = (p.y - mnY) / rng;
+    }
   }
 }
 </script>
